@@ -1,4 +1,7 @@
 #include "ntt/loop.h"
+#include "ntt/defs.h"
+#include "ntt/mpsc_queue.h"
+#include "ntt/node.h"
 #include "ntt/squeue.h"
 #include "ntt/task_queue.h"
 #include "ntt/thread_pool.h"
@@ -18,6 +21,7 @@
 #include <random>
 #include <thread>
 #include <type_traits>
+#include <urcu/wfcqueue.h>
 #include <utility>
 
 template <class Functor> struct Task {
@@ -142,20 +146,82 @@ template <class Functor> ntt_task_node *make_task(Functor &&functor) {
   return &node->node;
 }
 
-template <class Functor> struct SerialQueueTaskNode : Functor {
+template <class Functor> struct SerialQueueTaskNode {
   static void svc(void *arg) {
     auto task_node = static_cast<SerialQueueTaskNode *>(arg);
-    (*task_node)();
-    delete task_node;
+    task_node->m_func();
+    task_node->m_func.~Functor();
   }
+  static void del(void *arg);
   static_assert(std::is_same_v<std::decay_t<Functor>, Functor>);
   template <class In>
-  SerialQueueTaskNode(In &&func) : Functor(std::forward<In>(func)) {
+  SerialQueueTaskNode(In &&func) : m_func(std::forward<In>(func)) {
     serial_queue_task.svc = svc;
+    serial_queue_task.del = del;
     serial_queue_task.arg = this;
   }
+  template <class In> SerialQueueTaskNode &operator=(In &func) {
+    new (&m_func) Functor(std::forward<In>(func));
+    return *this;
+  }
+  Functor m_func;
   ntt_sq_task serial_queue_task;
 };
+
+template <class Functor> struct SerialQueueTaskNodePool {
+  SerialQueueTaskNodePool() { m_node.next = NULL; }
+  SerialQueueTaskNode<Functor> *get() {
+    if (auto node = alloc()) {
+      ntt_node *t1 = ntt_container_of(node, ntt_node, node);
+      ntt_sq_task *t2 = ntt_container_of(t1, ntt_sq_task, node);
+      return ntt_container_of(t2, SerialQueueTaskNode<Functor>,
+                              serial_queue_task);
+    };
+    return nullptr;
+  }
+
+  struct cds_wfcq_node *alloc() {
+    if (m_node.next != NULL) {
+      auto tmp = m_node.next;
+      m_node.next = m_node.next->next;
+      if (m_tail == tmp) {
+        m_tail = &m_node;
+      }
+      return tmp;
+    }
+    return nullptr;
+  }
+  void free(SerialQueueTaskNode<Functor> *node) {
+    m_tail->next = &node->serial_queue_task.node.node;
+    m_tail = &node->serial_queue_task.node.node;
+    cnt += 1;
+  };
+  struct cds_wfcq_node m_node;
+  struct cds_wfcq_node *m_tail = &m_node;
+  std::size_t cnt = 0;
+  ntt_mpsc_queue queue;
+};
+
+template <class Functor> SerialQueueTaskNodePool<Functor> &get_pool() {
+  thread_local SerialQueueTaskNodePool<Functor> pool;
+  return pool;
+}
+
+template <class Function>
+/* static */ void SerialQueueTaskNode<Function>::del(void *arg) {
+  auto task_node = static_cast<SerialQueueTaskNode *>(arg);
+  get_pool<Function>().free(task_node);
+}
+
+template <class Functor> ntt_sq_task *make_sq_task_cached(Functor &&functor) {
+  if (auto ptr = get_pool<Functor>().get()) {
+    *ptr = functor;
+    return &ptr->serial_queue_task;
+  }
+  auto node = new SerialQueueTaskNode<std::decay_t<Functor>>(
+      std::forward<Functor>(functor));
+  return &node->serial_queue_task;
+}
 
 template <class Functor> ntt_sq_task *make_sq_task(Functor &&functor) {
   auto node = new SerialQueueTaskNode<std::decay_t<Functor>>(
@@ -271,6 +337,17 @@ TEST(ntt, sq) {
   ntt_task_queue_destroy(&task_queue);
 }
 
+static constexpr std::size_t g_cnt = 100'000;
+static constexpr std::size_t n = 20;
+static constexpr std::size_t m = 1000;
+static constexpr std::size_t k = 4;
+static constexpr std::chrono::microseconds g_wakeup{10};
+static constexpr std::chrono::microseconds g_wakeup_noise{2};
+static constexpr std::chrono::microseconds g_recv_work{5};
+static constexpr std::chrono::microseconds g_recv_noise{2};
+static constexpr std::chrono::microseconds g_proc_work{10};
+static constexpr std::chrono::microseconds g_proc_noise{2};
+
 TEST(ntt, stand) {
   static constexpr std::size_t g_width = 8;
   std::promise<void> p;
@@ -284,17 +361,6 @@ TEST(ntt, stand) {
   /// 4. fnw[x]
   /// 4. fnw[x]
   /// 4. fnw[x]
-
-  static constexpr std::size_t g_cnt = 1'000'000;
-  static constexpr std::size_t n = 20;
-  static constexpr std::size_t m = 1000;
-  static constexpr std::size_t k = 4;
-  static constexpr std::chrono::microseconds g_wakeup{10};
-  static constexpr std::chrono::microseconds g_wakeup_noise{2};
-  static constexpr std::chrono::microseconds g_recv_work{5};
-  static constexpr std::chrono::microseconds g_recv_noise{2};
-  static constexpr std::chrono::microseconds g_proc_work{10};
-  static constexpr std::chrono::microseconds g_proc_noise{2};
 
   struct ctx {
     std::vector<std::size_t> fn = std::vector<std::size_t>(g_cnt);
@@ -375,22 +441,26 @@ TEST(ntt, stand) {
   for (std::size_t i = 0; i < g_cnt; ++i) {
     int x = i;
     std::this_thread::sleep_for(ctx.fnw[x]);
-    ctx.in[x] = std::chrono::high_resolution_clock::now();
-    ntt_squeue_dispatch(&ctx.recv[ctx.fn[x]], make_sq_task([ctx = &ctx, x = i] {
-      std::this_thread::sleep_for(ctx->fmw[x]);
-      // we are in recv queue
-      ntt_squeue_dispatch(&ctx->proc[ctx->fm[x]], make_sq_task([ctx, x = x] {
-        std::this_thread::sleep_for(ctx->fkw[x]);
-        // we are in proc queue
-        ntt_squeue_dispatch(&ctx->send[ctx->fk[x]], make_sq_task([ctx, x = x] {
-          // we are in send queue
-          ctx->out[x] = std::chrono::high_resolution_clock::now();
-          if (ctx->done_cnt.fetch_add(1) == g_cnt - 1) {
-            ctx->done.set_value();
-          }
+    ntt_squeue_dispatch(
+        &ctx.recv[ctx.fn[x]], make_sq_task_cached([ctx = &ctx, x = i] mutable {
+          ctx->in[x] = std::chrono::high_resolution_clock::now();
+          // std::this_thread::sleep_for(ctx->fmw[x]);
+          // we are in recv queue
+          ntt_squeue_dispatch(
+              &ctx->proc[ctx->fm[x]], make_sq_task_cached([ctx, x = x] mutable {
+                // std::this_thread::sleep_for(ctx->fkw[x]);
+                // we are in proc queue
+                ntt_squeue_dispatch(
+                    &ctx->send[ctx->fk[x]],
+                    make_sq_task_cached([ctx, x = x] mutable {
+                      // we are in send queue
+                      ctx->out[x] = std::chrono::high_resolution_clock::now();
+                      if (ctx->done_cnt.fetch_add(1) == g_cnt - 1) {
+                        ctx->done.set_value();
+                      }
+                    }));
+              }));
         }));
-      }));
-    }));
   }
 
   ctx.f.wait();
@@ -404,12 +474,11 @@ TEST(ntt, stand) {
     res[i] = ctx.out[i] - ctx.in[i];
   }
   std::sort(res.begin(), res.end());
-  std::cout << "50%% " << res[static_cast<int>(res.size() * 0.5)].count() / 1000
+  std::cout << "50%% " << res[static_cast<int>(res.size() * 0.5)].count()
             << std::endl;
-  std::cout << "80%% " << res[static_cast<int>(res.size() * 0.8)].count() / 1000
+  std::cout << "80%% " << res[static_cast<int>(res.size() * 0.8)].count()
             << std::endl;
-  std::cout << "95%% "
-            << res[static_cast<int>(res.size() * 0.95)].count() / 1000
+  std::cout << "95%% " << res[static_cast<int>(res.size() * 0.95)].count()
             << std::endl;
 }
 
@@ -428,17 +497,6 @@ TEST(boost, stand) {
   /// 4. fnw[x]
 
   // static constexpr std::size_t g_cnt = 1'000'000;
-  static constexpr std::size_t g_cnt = 1'000;
-  static constexpr std::size_t n = 20;
-  static constexpr std::size_t m = 1000;
-  static constexpr std::size_t k = 4;
-  static constexpr std::chrono::microseconds g_wakeup{100};
-  static constexpr std::chrono::microseconds g_wakeup_noise{2};
-  static constexpr std::chrono::microseconds g_recv_work{5};
-  static constexpr std::chrono::microseconds g_recv_noise{2};
-  static constexpr std::chrono::microseconds g_proc_work{10};
-  static constexpr std::chrono::microseconds g_proc_noise{2};
-
   boost::asio::io_context context;
 
   struct ctx {
@@ -509,12 +567,12 @@ TEST(boost, stand) {
   for (std::size_t i = 0; i < g_cnt; ++i) {
     int x = i;
     std::this_thread::sleep_for(ctx.fnw[x]);
-    ctx.in[x] = std::chrono::high_resolution_clock::now();
     boost::asio::dispatch(ctx.recv[ctx.fn[x]], [ctx = &ctx, x] {
-      std::this_thread::sleep_for(ctx->fmw[x]);
+      ctx->in[x] = std::chrono::high_resolution_clock::now();
+      // std::this_thread::sleep_for(ctx->fmw[x]);
       // we are in recv queue
       boost::asio::dispatch(ctx->proc[ctx->fm[x]], [ctx, x = x] {
-        std::this_thread::sleep_for(ctx->fkw[x]);
+        // std::this_thread::sleep_for(ctx->fkw[x]);
         // we are in proc queue
         boost::asio::dispatch(ctx->send[ctx->fk[x]], [ctx, x = x] {
           // we are in send queue
@@ -538,11 +596,10 @@ TEST(boost, stand) {
     res[i] = ctx.out[i] - ctx.in[i];
   }
   std::sort(res.begin(), res.end());
-  std::cout << "50%% " << res[static_cast<int>(res.size() * 0.5)].count() / 1000
+  std::cout << "50%% " << res[static_cast<int>(res.size() * 0.5)].count()
             << std::endl;
-  std::cout << "80%% " << res[static_cast<int>(res.size() * 0.8)].count() / 1000
+  std::cout << "80%% " << res[static_cast<int>(res.size() * 0.8)].count()
             << std::endl;
-  std::cout << "95%% "
-            << res[static_cast<int>(res.size() * 0.95)].count() / 1000
+  std::cout << "95%% " << res[static_cast<int>(res.size() * 0.95)].count()
             << std::endl;
 }

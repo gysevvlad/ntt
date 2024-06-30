@@ -14,6 +14,7 @@ struct ntt_squeue {
 
 struct ntt_sq_task {
   void (*svc)(void *arg);
+  void (*del)(void *arg);
   void *arg;
   struct ntt_node node;
 };

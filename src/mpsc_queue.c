@@ -37,6 +37,14 @@ struct ntt_node *ntt_mpsc_queue_front(struct ntt_mpsc_queue *queue) {
   return ntt_container_of(node, struct ntt_node, node);
 }
 
+int ntt_mpsc_queue_lookup(struct ntt_mpsc_queue *queue, struct ntt_node *node) {
+  struct cds_wfcq_node *tmp = NULL;
+  do {
+    __cds_wfcq_next_nonblocking(&queue->head, &queue->tail, &node->node);
+  } while (tmp == CDS_WFCQ_WOULDBLOCK);
+  return tmp != NULL ? 1 : 0;
+}
+
 struct ntt_node *ntt_mpsc_queue_pop(struct ntt_mpsc_queue *queue, int *last) {
   DEBUG_ASSERT(queue->initialized == true);
 
@@ -45,6 +53,19 @@ struct ntt_node *ntt_mpsc_queue_pop(struct ntt_mpsc_queue *queue, int *last) {
     node = __cds_wfcq_dequeue_with_state_nonblocking(&queue->head, &queue->tail,
                                                      last);
   } while (node == NULL || node == CDS_WFCQ_WOULDBLOCK);
+
+  return ntt_container_of(node, struct ntt_node, node);
+}
+
+struct ntt_node *ntt_mpsc_queue_pop_nonblocking(struct ntt_mpsc_queue *queue,
+                                                int *last) {
+  DEBUG_ASSERT(queue->initialized == true);
+
+  struct cds_wfcq_node *node;
+  do {
+    node = __cds_wfcq_dequeue_with_state_nonblocking(&queue->head, &queue->tail,
+                                                     last);
+  } while (node == CDS_WFCQ_WOULDBLOCK);
 
   return ntt_container_of(node, struct ntt_node, node);
 }
