@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ntt/defs.h"
+#include "ntt/export.h"
 
 EXTERN_START
 
@@ -16,9 +17,9 @@ struct ntt_thread_pool_config {
 
 struct ntt_thread_pool;
 
-struct ntt_thread_pool *
+NTT_EXPORT struct ntt_thread_pool *
 ntt_thread_pool_create_from_config(const struct ntt_thread_pool_config *config);
 
-void ntt_thread_pool_release(struct ntt_thread_pool *thread_pool);
+NTT_EXPORT void ntt_thread_pool_release(struct ntt_thread_pool *thread_pool);
 
 EXTERN_STOP

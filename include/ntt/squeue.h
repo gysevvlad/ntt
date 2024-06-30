@@ -19,11 +19,12 @@ struct ntt_sq_task {
   struct ntt_node node;
 };
 
-void ntt_squeue_init(struct ntt_squeue *squeue,
-                     struct ntt_task_queue *task_queue);
+NTT_EXPORT void ntt_squeue_init(struct ntt_squeue *squeue,
+                                struct ntt_task_queue *task_queue);
 
-void ntt_squeue_dispatch(struct ntt_squeue *queue, struct ntt_sq_task *node);
+NTT_EXPORT void ntt_squeue_dispatch(struct ntt_squeue *queue,
+                                    struct ntt_sq_task *node);
 
-void ntt_squeue_destroy(struct ntt_squeue *queue);
+NTT_EXPORT void ntt_squeue_destroy(struct ntt_squeue *queue);
 
 EXTERN_STOP

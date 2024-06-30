@@ -3,8 +3,11 @@ cmake_minimum_required(VERSION 3.23)
 project(ntt)
 
 include(FindPkgConfig)
+include(GenerateExportHeader)
 
 add_library(ntt SHARED)
+
+generate_export_header(ntt EXPORT_FILE_NAME include/ntt/export.h)
 
 target_sources(
   ntt
@@ -24,9 +27,10 @@ target_sources(
   PUBLIC
     FILE_SET public_headers
     TYPE HEADERS
-    BASE_DIRS include
+    BASE_DIRS include ${CMAKE_CURRENT_BINARY_DIR}/include
     FILES
       # include/ntt/cqueue.h
+      ${CMAKE_CURRENT_BINARY_DIR}/include/ntt/export.h
       include/ntt/loop.h
       include/ntt/malloc.h
       include/ntt/work_loop.h
@@ -49,6 +53,7 @@ set_target_properties(
   PROPERTIES
     C_STANDARD 23
     C_STANDARD_REQUIRED ON
-    C_EXTENSIONS OFF)
+    C_EXTENSIONS OFF
+    C_VISIBILITY_PRESET hidden)
 
 add_subdirectory(tests)

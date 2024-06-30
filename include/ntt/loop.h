@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ntt/defs.h"
+#include "ntt/export.h"
 
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
@@ -32,13 +33,13 @@ struct ntt_event_loop {
   uint64_t active_events;
 };
 
-void ntt_event_loop_init(struct ntt_event_loop *event_loop);
+NTT_EXPORT void ntt_event_loop_init(struct ntt_event_loop *event_loop);
 
-void ntt_event_loop_action(struct ntt_event_loop *event_loop,
-                           struct ntt_epoll_fd *epoll_fd);
+NTT_EXPORT void ntt_event_loop_action(struct ntt_event_loop *event_loop,
+                                      struct ntt_epoll_fd *epoll_fd);
 
-void ntt_event_loop_run_once(struct ntt_event_loop *event_loop);
+NTT_EXPORT void ntt_event_loop_run_once(struct ntt_event_loop *event_loop);
 
-void ntt_event_loop_run(struct ntt_event_loop *event_loop);
+NTT_EXPORT void ntt_event_loop_run(struct ntt_event_loop *event_loop);
 
 EXTERN_STOP
