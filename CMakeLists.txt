@@ -10,7 +10,7 @@ target_sources(
   ntt
   PRIVATE
     # src/cqueue.c
-    src/engine.c
+    # src/engine.c
     src/loop.c
     src/malloc.c
     src/mpsc_queue.c
@@ -31,9 +31,9 @@ target_sources(
       include/ntt/malloc.h
       include/ntt/work_loop.h
       include/ntt/mpsc_queue.h
-      include/ntt/pollable_queue.h
+      # include/ntt/pollable_queue.h
       include/ntt/signal.h
-      include/ntt/signal_cv.h
+      # include/ntt/signal_cv.h
       include/ntt/squeue.h
       include/ntt/task.h
       include/ntt/task_queue.h
