@@ -1,5 +1,6 @@
 #include "ntt/task_queue.h"
 #include "ntt/malloc.h"
+#include <assert.h>
 #include <threads.h>
 
 void ntt_task_queue_init(struct ntt_task_queue *task_queue) {
@@ -22,6 +23,8 @@ void ntt_task_queue_push(struct ntt_task_queue *task_queue,
 
 void ntt_task_queue_stop(struct ntt_task_queue *task_queue) {
   mtx_lock(&task_queue->m);
+  assert(task_queue->stopped == 0 &&
+         "internal error: task queue already stopped");
   task_queue->stopped = 1;
   cnd_broadcast(&task_queue->c);
   mtx_unlock(&task_queue->m);

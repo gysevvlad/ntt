@@ -1,54 +1,95 @@
 #include "ntt/thread_pool.h"
 #include "ntt/malloc.h"
+#include "thread_pool_impl.h"
+#include <assert.h>
+#include <stdatomic.h>
 #include <stdbool.h>
+#include <string.h>
 #include <threads.h>
 
-void ntt_thread_pool_init(struct ntt_thread_pool *thread_pool, size_t width,
-                          thrd_start_t start, void *arg,
-                          void (*stop_callback)(void *),
-                          void *stop_callback_arg) {
-  thread_pool->width = width;
-  thread_pool->threads = ntt_calloc(width, sizeof(thrd_t));
-  thread_pool->stop_callback = stop_callback;
-  thread_pool->stop_callback_arg = stop_callback_arg;
-  for (size_t i = 0; i < width; ++i) {
-    thrd_create(&thread_pool->threads[i], start, arg);
+void ntt_thread_pool_release_internal_ref(struct ntt_thread_pool *thread_pool) {
+  size_t prev = atomic_fetch_sub(&thread_pool->internal_refs, 1);
+  assert(prev > 0);
+
+  if (prev == 1) {
+    void (*complete_cb)(void *complete_arg) = thread_pool->config.complete_cb;
+    void *complete_arg = thread_pool->config.complete_arg;
+    ntt_free(thread_pool->threads);
+    ntt_free(thread_pool);
+    complete_cb(complete_arg);
   }
 }
 
-struct stop_context {
-  void *stop_callback_arg;
-  void (*stop_callback)(void *stop_callback_arg);
-  thrd_t join_thread;
-};
+void ntt_thread_pool_configure(struct ntt_thread_pool *thread_pool) {
+  thrd_t thrd = thrd_current();
+  for (unsigned i = 0; i < thread_pool->config.width; ++i) {
+    if (thrd == thread_pool->threads[i]) {
+      if (thread_pool->config.configure_cb) {
+        thread_pool->config.configure_cb(thread_pool->config.configure_arg, i);
+      }
+      return;
+    }
+  }
+  assert(false);
+}
 
-int ntt_join_stop(void *arg) {
-  struct stop_context *ctx = arg;
-  int res;
-  thrd_join(ctx->join_thread, &res);
-  ctx->stop_callback(ctx->stop_callback_arg);
-  ntt_free(ctx);
+int ntt_thread_pool_svc(void *arg) {
+  struct ntt_thread_pool *thread_pool = arg;
+
+  mtx_lock(&thread_pool->mtx);
+  while (!thread_pool->start) {
+    cnd_wait(&thread_pool->cnd, &thread_pool->mtx);
+  }
+  mtx_unlock(&thread_pool->mtx);
+
+  ntt_thread_pool_configure(thread_pool);
+  thread_pool->config.svc_cb(thread_pool->config.svc_arg);
+
+  ntt_thread_pool_release_internal_ref(thread_pool);
   return 0;
 }
 
-void ntt_thread_pool_destroy(struct ntt_thread_pool *thread_pool) {
-  bool self_destroy = false;
-  for (size_t i = 0; i < thread_pool->width; ++i) {
-    if (thread_pool->threads[i] != thrd_current()) {
-      thrd_join(thread_pool->threads[i], NULL);
-    } else {
-      self_destroy = true;
-      struct stop_context *ctx = ntt_malloc(sizeof(struct stop_context));
-      ctx->stop_callback = thread_pool->stop_callback;
-      ctx->stop_callback_arg = thread_pool->stop_callback_arg;
-      ctx->join_thread = thread_pool->threads[i];
-      thrd_t stop_thread;
-      thrd_create(&stop_thread, ntt_join_stop, ctx);
-      thrd_detach(stop_thread);
-    }
+struct ntt_thread_pool *
+ntt_thread_pool_create_from_config(const struct ntt_thread_pool_config *config) {
+
+  struct ntt_thread_pool *thread_pool =
+      ntt_malloc(sizeof(struct ntt_thread_pool));
+
+  memcpy(&thread_pool->config, config, sizeof(struct ntt_thread_pool_config));
+
+  thread_pool->external_refs = 1;
+  thread_pool->internal_refs = thread_pool->config.width + 1;
+
+  thread_pool->threads = ntt_calloc(thread_pool->config.width, sizeof(thrd_t));
+
+  mtx_init(&thread_pool->mtx, mtx_plain);
+  cnd_init(&thread_pool->cnd);
+
+  mtx_lock(&thread_pool->mtx);
+  for (unsigned i = 0; i < thread_pool->config.width; ++i) {
+    thrd_create(&thread_pool->threads[i], ntt_thread_pool_svc, thread_pool);
   }
-  ntt_free(thread_pool->threads);
-  if (!self_destroy) {
-    thread_pool->stop_callback(thread_pool->stop_callback_arg);
+  thread_pool->start = true;
+  cnd_broadcast(&thread_pool->cnd);
+  mtx_unlock(&thread_pool->mtx);
+
+  for (unsigned i = 0; i < thread_pool->config.width; ++i) {
+    thrd_detach(thread_pool->threads[i]);
   }
+
+  return thread_pool;
+}
+
+void ntt_thread_pool_release(struct ntt_thread_pool *thread_pool) {
+  size_t prev = atomic_fetch_sub(&thread_pool->external_refs, 1);
+  assert(prev > 0 && "internal error: thread pool already destroyed");
+
+  if (prev == 1) {
+    ntt_thread_pool_release_internal_ref(thread_pool);
+  }
+}
+
+void ntt_thread_pool_acquire(struct ntt_thread_pool *thread_pool) {
+  size_t prev = atomic_fetch_add(&thread_pool->external_refs, 1);
+  assert(prev > 0 && "internal error: thread pool already destroyed");
 }

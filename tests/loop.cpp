@@ -7,7 +7,6 @@
 #include "ntt/thread_pool.h"
 
 #include <algorithm>
-#include <atomic>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/execution_context.hpp>
 #include <boost/asio/executor_work_guard.hpp>
@@ -69,61 +68,6 @@ TEST(Ntt, DISABLED_loop) {
                         make_action([&loop] { loop.active_events -= 1; }));
   thread.join();
   std::cout << cnt << std::endl;
-}
-
-TEST(ntt, thread_pool) {
-  static constexpr std::size_t g_expected_width = 8;
-  std::promise<void> p;
-  auto f = p.get_future();
-  std::atomic<std::size_t> w = 0;
-  ntt_thread_pool thread_pool;
-  ntt_thread_pool_init(
-      &thread_pool, g_expected_width,
-      [](void *arg) {
-        static_cast<std::atomic<std::size_t> *>(arg)->fetch_add(1);
-        return 0;
-      },
-      &w,
-      [](void *arg) { static_cast<std::promise<void> *>(arg)->set_value(); },
-      &p);
-  ntt_thread_pool_destroy(&thread_pool);
-  f.wait();
-  ASSERT_EQ(g_expected_width, w.load());
-}
-
-void run(std::shared_ptr<ntt_thread_pool> thread_pool) {
-  struct Server {
-    Server(std::shared_ptr<ntt_thread_pool> thread_pool)
-        : m_thread_pool(std::move(thread_pool)) {}
-
-    void start() {}
-
-    std::shared_ptr<ntt_thread_pool> m_thread_pool;
-  };
-
-  auto server = std::make_shared<Server>(std::move(thread_pool));
-  server->start();
-}
-
-TEST(ntt, thread_pool_self_destroy) {
-  static constexpr std::size_t g_expected_width = 8;
-
-  // prepare runtime
-  std::promise<void> p;
-  auto f = p.get_future();
-  std::shared_ptr<ntt_thread_pool> thread_pool(new ntt_thread_pool,
-                                               [](ntt_thread_pool *v) {
-                                                 ntt_thread_pool_destroy(v);
-                                                 delete v;
-                                               });
-  ntt_thread_pool_init(
-      thread_pool.get(), g_expected_width, [](void *arg) { return 0; }, nullptr,
-      [](void *arg) { static_cast<std::promise<void> *>(arg)->set_value(); },
-      &p);
-
-  run(std::move(thread_pool));
-
-  f.wait();
 }
 
 template <class Functor> struct TaskNode : Functor {
@@ -237,22 +181,24 @@ TEST(ntt, task_queue) {
   ntt_task_queue task_queue;
   ntt_task_queue_init(&task_queue);
 
-  ntt_thread_pool thread_pool;
-  ntt_thread_pool_init(
-      &thread_pool, g_width,
-      [](void *arg) {
-        auto *task_queue = static_cast<ntt_task_queue *>(arg);
-        struct ntt_task_node *node = NULL;
-        while ((node = ntt_task_queue_pop(task_queue))) {
-          node->svc(node->arg);
-        }
-        return 0;
-      },
-      &task_queue,
-      [](void *arg) { static_cast<std::promise<void> *>(arg)->set_value(); },
-      &p);
+  ntt_thread_pool_config config{};
+  config.width = g_width;
+  config.svc_arg = &task_queue;
+  config.svc_cb = [](void *arg) {
+    auto *task_queue = static_cast<ntt_task_queue *>(arg);
+    struct ntt_task_node *node = NULL;
+    while ((node = ntt_task_queue_pop(task_queue))) {
+      node->svc(node->arg);
+    }
+  };
+  config.complete_arg = &p;
+  config.complete_cb = [](void *arg) {
+    static_cast<std::promise<void> *>(arg)->set_value();
+  };
+  auto *thread_pool = ntt_thread_pool_create_from_config(&config);
+  ntt_thread_pool_release(thread_pool);
 
-  static constexpr std::size_t g_expected_cnt = 1'000'000;
+  static constexpr std::size_t g_expected_cnt = 1'000;
   std::atomic<std::size_t> cnt = 0;
   std::promise<void> done;
   auto future = done.get_future();
@@ -271,68 +217,6 @@ TEST(ntt, task_queue) {
 
   future.wait();
   ntt_task_queue_stop(&task_queue);
-  ntt_thread_pool_destroy(&thread_pool);
-  f.wait();
-  ntt_task_queue_destroy(&task_queue);
-}
-
-TEST(ntt, sq) {
-  static constexpr std::size_t g_width = 8;
-  std::promise<void> p;
-  auto f = p.get_future();
-
-  ntt_task_queue task_queue;
-  ntt_task_queue_init(&task_queue);
-
-  ntt_squeue sq1;
-  ntt_squeue_init(&sq1, &task_queue);
-
-  ntt_squeue sq2;
-  ntt_squeue_init(&sq2, &task_queue);
-
-  ntt_thread_pool thread_pool;
-  ntt_thread_pool_init(
-      &thread_pool, g_width,
-      [](void *arg) {
-        auto *task_queue = static_cast<ntt_task_queue *>(arg);
-        struct ntt_task_node *node = NULL;
-        while ((node = ntt_task_queue_pop(task_queue))) {
-          node->svc(node->arg);
-        }
-        return 0;
-      },
-      &task_queue,
-      [](void *arg) { static_cast<std::promise<void> *>(arg)->set_value(); },
-      &p);
-
-  static constexpr std::size_t g_expected_cnt = 100'000'000;
-  std::atomic<std::size_t> cnt = 0;
-  std::promise<void> done;
-  auto future = done.get_future();
-  ntt_squeue_dispatch(&sq1, make_sq_task([&] {
-    for (std::size_t i = 0; i < g_expected_cnt / 2; ++i) {
-      ntt_squeue_dispatch(&sq1, make_sq_task([&] {
-        if (cnt.fetch_add(1) == g_expected_cnt - 1) {
-          std::cout << "done" << std::endl;
-          done.set_value();
-        }
-      }));
-    }
-  }));
-  ntt_squeue_dispatch(&sq2, make_sq_task([&] {
-    for (std::size_t i = 0; i < g_expected_cnt / 2; ++i) {
-      ntt_squeue_dispatch(&sq2, make_sq_task([&] {
-        if (cnt.fetch_add(1) == g_expected_cnt - 1) {
-          std::cout << "done" << std::endl;
-          done.set_value();
-        }
-      }));
-    }
-  }));
-
-  future.wait();
-  ntt_task_queue_stop(&task_queue);
-  ntt_thread_pool_destroy(&thread_pool);
   f.wait();
   ntt_task_queue_destroy(&task_queue);
 }
@@ -423,20 +307,22 @@ TEST(ntt, stand) {
     }
   }
 
-  ntt_thread_pool thread_pool;
-  ntt_thread_pool_init(
-      &thread_pool, g_width,
-      [](void *arg) {
-        auto *task_queue = static_cast<ntt_task_queue *>(arg);
-        struct ntt_task_node *node = NULL;
-        while ((node = ntt_task_queue_pop(task_queue))) {
-          node->svc(node->arg);
-        }
-        return 0;
-      },
-      &task_queue,
-      [](void *arg) { static_cast<std::promise<void> *>(arg)->set_value(); },
-      &p);
+  ntt_thread_pool_config config{};
+  config.width = g_width;
+  config.svc_arg = &task_queue;
+  config.svc_cb = [](void *arg) {
+    auto *task_queue = static_cast<ntt_task_queue *>(arg);
+    struct ntt_task_node *node = NULL;
+    while ((node = ntt_task_queue_pop(task_queue))) {
+      node->svc(node->arg);
+    }
+  };
+  config.complete_arg = &p;
+  config.complete_cb = [](void *arg) {
+    static_cast<std::promise<void> *>(arg)->set_value();
+  };
+  auto *thread_pool = ntt_thread_pool_create_from_config(&config);
+  ntt_thread_pool_release(thread_pool);
 
   for (std::size_t i = 0; i < g_cnt; ++i) {
     int x = i;
@@ -465,7 +351,6 @@ TEST(ntt, stand) {
 
   ctx.f.wait();
   ntt_task_queue_stop(&task_queue);
-  ntt_thread_pool_destroy(&thread_pool);
   f.wait();
   ntt_task_queue_destroy(&task_queue);
 

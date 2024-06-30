@@ -2,22 +2,23 @@
 
 #include "ntt/defs.h"
 
-#include <threads.h>
-
 EXTERN_START
 
-struct ntt_thread_pool {
-  size_t width;
-  thrd_t *threads;
-  void *stop_callback_arg;
-  void (*stop_callback)(void *stop_callback_arg);
+struct ntt_thread_pool_config {
+  unsigned width;
+  void *configure_arg;
+  void (*configure_cb)(void *configure_arg, unsigned i);
+  void *svc_arg;
+  void (*svc_cb)(void *svc_arg);
+  void *complete_arg;
+  void (*complete_cb)(void *complete_arg);
 };
 
-void ntt_thread_pool_init(struct ntt_thread_pool *thread_pool, size_t width,
-                          thrd_start_t start, void *arg,
-                          void (*stop_callback)(void *),
-                          void *stop_callback_arg);
+struct ntt_thread_pool;
 
-void ntt_thread_pool_destroy(struct ntt_thread_pool *thread_pool);
+struct ntt_thread_pool *
+ntt_thread_pool_create_from_config(const struct ntt_thread_pool_config *config);
+
+void ntt_thread_pool_release(struct ntt_thread_pool *thread_pool);
 
 EXTERN_STOP

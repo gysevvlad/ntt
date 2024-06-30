@@ -14,13 +14,13 @@ target_sources(
     src/loop.c
     src/malloc.c
     src/mpsc_queue.c
-    src/ntt.c
     src/signal.c
     src/signal_cv.c
     src/squeue.c
     src/task.c
     src/task_queue.c
     src/thread_pool.c
+    src/work_loop.c
   PUBLIC
     FILE_SET public_headers
     TYPE HEADERS
@@ -29,8 +29,8 @@ target_sources(
       # include/ntt/cqueue.h
       include/ntt/loop.h
       include/ntt/malloc.h
+      include/ntt/work_loop.h
       include/ntt/mpsc_queue.h
-      include/ntt/ntt.h
       include/ntt/pollable_queue.h
       include/ntt/signal.h
       include/ntt/signal_cv.h
