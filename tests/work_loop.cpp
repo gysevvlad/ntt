@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "TaskNode.h"
+#include "Event.h"
 
 #include "ntt/work_loop.h"
 
@@ -25,7 +25,7 @@ TEST(ntt, work_loop) {
   for (std::size_t i = 0; i < g_task_cnt; ++i) {
     ntt_work_loop_dispatch(
         work_loop,
-        ntt::make_task([work_loop = ntt_work_loop_acquire(work_loop), &cnt] {
+        ntt::make_event([work_loop = ntt_work_loop_acquire(work_loop), &cnt] {
           cnt += 1;
           ntt_work_loop_release(work_loop);
         }));

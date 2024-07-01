@@ -28,9 +28,9 @@ void ntt_work_loop_release_external_ref(struct ntt_work_loop *work_loop) {
 
 void ntt_work_loop_svc(void *arg) {
   struct ntt_work_loop *work_loop = arg;
-  struct ntt_task_node *node = NULL;
-  while ((node = ntt_event_queue_pop(&work_loop->event_queue))) {
-    node->svc(node->svc_arg);
+  struct ntt_event *event = NULL;
+  while ((event = ntt_event_queue_pop(&work_loop->event_queue))) {
+    event->svc(event->svc_arg);
   }
   ntt_work_loop_release_internal_ref(work_loop);
 }
@@ -72,6 +72,6 @@ ntt_work_loop_create_from_config(const struct ntt_work_loop_config *config) {
 }
 
 void ntt_work_loop_dispatch(struct ntt_work_loop *work_loop,
-                            struct ntt_task_node *task_node) {
-  ntt_event_queue_push(&work_loop->event_queue, task_node);
+                            struct ntt_event *event) {
+  ntt_event_queue_push(&work_loop->event_queue, event);
 }

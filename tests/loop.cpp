@@ -71,24 +71,23 @@ TEST(Ntt, DISABLED_loop) {
   std::cout << cnt << std::endl;
 }
 
-template <class Functor> struct TaskNode : Functor {
+template <class Functor> struct Event : Functor {
   static void svc(void *arg) {
-    auto task_node = static_cast<TaskNode *>(arg);
-    (*task_node)();
-    delete task_node;
+    auto event = static_cast<Event *>(arg);
+    (*event)();
+    delete event;
   }
   static_assert(std::is_same_v<std::decay_t<Functor>, Functor>);
-  template <class In> TaskNode(In &&func) : Functor(std::forward<In>(func)) {
-    node.svc = svc;
-    node.svc_arg = this;
+  template <class In> Event(In &&func) : Functor(std::forward<In>(func)) {
+    event.svc = svc;
+    event.svc_arg = this;
   }
-  ntt_task_node node;
+  ntt_event event;
 };
 
-template <class Functor> ntt_task_node *make_task(Functor &&functor) {
-  auto node =
-      new TaskNode<std::decay_t<Functor>>(std::forward<Functor>(functor));
-  return &node->node;
+template <class Functor> ntt_event *make_event(Functor &&functor) {
+  auto event = new Event<std::decay_t<Functor>>(std::forward<Functor>(functor));
+  return &event->event;
 }
 
 template <class Functor> struct SerialQueueTaskNode {
@@ -187,9 +186,9 @@ TEST(ntt, task_queue_dep) {
   config.svc_arg = &event_queue;
   config.svc_cb = [](void *arg) {
     auto *event_queue = static_cast<ntt_event_queue *>(arg);
-    struct ntt_task_node *node = NULL;
-    while ((node = ntt_event_queue_pop(event_queue))) {
-      node->svc(node->svc_arg);
+    struct ntt_event *event = NULL;
+    while ((event = ntt_event_queue_pop(event_queue))) {
+      event->svc(event->svc_arg);
     }
   };
   config.complete_arg = &p;
@@ -203,9 +202,9 @@ TEST(ntt, task_queue_dep) {
   std::atomic<std::size_t> cnt = 0;
   std::promise<void> done;
   auto future = done.get_future();
-  ntt_event_queue_push(&event_queue, make_task([&] {
+  ntt_event_queue_push(&event_queue, make_event([&] {
     for (std::size_t i = 0; i < g_expected_cnt; ++i) {
-      ntt_event_queue_push(&event_queue, make_task([&] {
+      ntt_event_queue_push(&event_queue, make_event([&] {
         for (std::size_t i = 0; i < g_expected_cnt; ++i) {
           __asm__("nop");
         }

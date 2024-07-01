@@ -10,5 +10,5 @@ struct ntt_task_queue {
   atomic_size_t refs;
   struct ntt_mpsc_queue mpsc_queue;
   struct ntt_work_loop *work_loop;
-  struct ntt_task_node task_node;
+  struct ntt_event event;
 };

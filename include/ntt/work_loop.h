@@ -24,6 +24,6 @@ NTT_EXPORT struct ntt_work_loop *
 ntt_work_loop_acquire(struct ntt_work_loop *work_loop);
 
 NTT_EXPORT void ntt_work_loop_dispatch(struct ntt_work_loop *work_loop,
-                                       struct ntt_task_node *task_node);
+                                       struct ntt_event *event);
 
 EXTERN_STOP

@@ -12,11 +12,11 @@ void ntt_event_queue_init(struct ntt_event_queue *event_queue) {
 }
 
 void ntt_event_queue_push(struct ntt_event_queue *event_queue,
-                          struct ntt_task_node *task_node) {
-  task_node->next = NULL;
+                          struct ntt_event *event) {
+  event->next = NULL;
   mtx_lock(&event_queue->m);
-  event_queue->tail->next = task_node;
-  event_queue->tail = task_node;
+  event_queue->tail->next = event;
+  event_queue->tail = event;
   mtx_unlock(&event_queue->m);
   cnd_signal(&event_queue->c);
 }
@@ -30,17 +30,17 @@ void ntt_event_queue_stop(struct ntt_event_queue *event_queue) {
   mtx_unlock(&event_queue->m);
 }
 
-struct ntt_task_node *ntt_event_queue_pop(struct ntt_event_queue *event_queue) {
+struct ntt_event *ntt_event_queue_pop(struct ntt_event_queue *event_queue) {
   mtx_lock(&event_queue->m);
   for (;;) {
     if (event_queue->head.next != NULL) {
-      struct ntt_task_node *node = event_queue->head.next;
-      event_queue->head.next = node->next;
-      if (node == event_queue->tail) {
+      struct ntt_event *event = event_queue->head.next;
+      event_queue->head.next = event->next;
+      if (event == event_queue->tail) {
         event_queue->tail = &event_queue->head;
       }
       mtx_unlock(&event_queue->m);
-      return node;
+      return event;
     }
     if (event_queue->stopped) {
       mtx_unlock(&event_queue->m);
