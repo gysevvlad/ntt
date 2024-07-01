@@ -19,7 +19,7 @@ target_sources(
     src/mpsc_queue.c
     src/signal.c
     src/signal_cv.c
-    src/event_queue.c
+    src/task_queue.c
     src/task.c
     src/task_queue_dep.c
     src/thread_pool.c
@@ -38,7 +38,7 @@ target_sources(
       # include/ntt/pollable_queue.h
       include/ntt/signal.h
       # include/ntt/signal_cv.h
-      include/ntt/event_queue.h
+      include/ntt/task_queue.h
       include/ntt/task.h
       include/ntt/task_queue_dep.h
       include/ntt/thread_pool.h)

@@ -1,8 +1,8 @@
 #include "ntt/loop.h"
 #include "ntt/defs.h"
-#include "ntt/event_queue.h"
 #include "ntt/mpsc_queue.h"
 #include "ntt/node.h"
+#include "ntt/task_queue.h"
 #include "ntt/task_queue_dep.h"
 #include "ntt/thread_pool.h"
 #include "ntt/work_loop.h"
@@ -256,9 +256,9 @@ TEST(ntt, stand) {
     std::vector<std::chrono::microseconds> fmw{g_cnt};
     std::vector<std::chrono::microseconds> fkw{g_cnt};
 
-    std::vector<ntt_event_queue *> recv{n};
-    std::vector<ntt_event_queue *> proc{m};
-    std::vector<ntt_event_queue *> send{k};
+    std::vector<ntt_task_queue *> recv{n};
+    std::vector<ntt_task_queue *> proc{m};
+    std::vector<ntt_task_queue *> send{k};
 
     std::vector<std::chrono::high_resolution_clock::time_point> in{g_cnt};
     std::vector<std::chrono::high_resolution_clock::time_point> out{g_cnt};
@@ -310,7 +310,7 @@ TEST(ntt, stand) {
 
   for (auto &group : {&ctx.recv, &ctx.proc, &ctx.send}) {
     for (auto &queue : *group) {
-      queue = ntt_event_queue_create(work_loop);
+      queue = ntt_task_queue_create(work_loop);
     }
   }
 
@@ -319,16 +319,16 @@ TEST(ntt, stand) {
   for (std::size_t i = 0; i < g_cnt; ++i) {
     int x = i;
     std::this_thread::sleep_for(ctx.fnw[x]);
-    ntt_event_queue_dispatch(
+    ntt_task_queue_dispatch(
         ctx.recv[ctx.fn[x]], make_sq_task_cached([ctx = &ctx, x = i] mutable {
           ctx->in[x] = std::chrono::high_resolution_clock::now();
           // std::this_thread::sleep_for(ctx->fmw[x]);
           // we are in recv queue
-          ntt_event_queue_dispatch(
+          ntt_task_queue_dispatch(
               ctx->proc[ctx->fm[x]], make_sq_task_cached([ctx, x = x] mutable {
                 // std::this_thread::sleep_for(ctx->fkw[x]);
                 // we are in proc queue
-                ntt_event_queue_dispatch(
+                ntt_task_queue_dispatch(
                     ctx->send[ctx->fk[x]],
                     make_sq_task_cached([ctx, x = x] mutable {
                       // we are in send queue
@@ -345,7 +345,7 @@ TEST(ntt, stand) {
 
   for (auto &group : {&ctx.recv, &ctx.proc, &ctx.send}) {
     for (auto &queue : *group) {
-      ntt_event_queue_release(queue);
+      ntt_task_queue_release(queue);
     }
   }
 

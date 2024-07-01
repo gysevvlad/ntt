@@ -6,7 +6,7 @@
 
 #include <stdatomic.h>
 
-struct ntt_event_queue {
+struct ntt_task_queue {
   atomic_size_t refs;
   struct ntt_mpsc_queue mpsc_queue;
   struct ntt_work_loop *work_loop;
