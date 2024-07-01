@@ -318,9 +318,10 @@ TEST(ntt, stand) {
   for (std::size_t i = 0; i < g_cnt; ++i) {
     int x = i;
     std::this_thread::sleep_for(ctx.fnw[x]);
+    ctx.in[x] = std::chrono::high_resolution_clock::now();
     ntt_task_queue_dispatch(
         ctx.recv[ctx.fn[x]], make_sq_task_cached([ctx = &ctx, x = i] mutable {
-          ctx->in[x] = std::chrono::high_resolution_clock::now();
+          // ctx->in[x] = std::chrono::high_resolution_clock::now();
           // std::this_thread::sleep_for(ctx->fmw[x]);
           // we are in recv queue
           ntt_task_queue_dispatch(
@@ -448,8 +449,9 @@ TEST(boost, stand) {
   for (std::size_t i = 0; i < g_cnt; ++i) {
     int x = i;
     std::this_thread::sleep_for(ctx.fnw[x]);
+    ctx.in[x] = std::chrono::high_resolution_clock::now();
     boost::asio::dispatch(ctx.recv[ctx.fn[x]], [ctx = &ctx, x] {
-      ctx->in[x] = std::chrono::high_resolution_clock::now();
+      // ctx->in[x] = std::chrono::high_resolution_clock::now();
       // std::this_thread::sleep_for(ctx->fmw[x]);
       // we are in recv queue
       boost::asio::dispatch(ctx->proc[ctx->fm[x]], [ctx, x = x] {

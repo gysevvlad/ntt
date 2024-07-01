@@ -16,8 +16,8 @@ void ntt_event_queue_push(struct ntt_event_queue *event_queue,
   mtx_lock(&event_queue->mtx);
   event_queue->tail->next = event;
   event_queue->tail = event;
-  cnd_signal(&event_queue->cnd);
   mtx_unlock(&event_queue->mtx);
+  cnd_signal(&event_queue->cnd);
 }
 
 void ntt_event_queue_stop(struct ntt_event_queue *event_queue) {
