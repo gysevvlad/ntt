@@ -30,7 +30,7 @@ void ntt_work_loop_svc(void *arg) {
   struct ntt_work_loop *work_loop = arg;
   struct ntt_task_node *node = NULL;
   while ((node = ntt_task_queue_pop(&work_loop->task_queue))) {
-    node->svc(node->arg);
+    node->svc(node->svc_arg);
   }
   ntt_work_loop_release_internal_ref(work_loop);
 }

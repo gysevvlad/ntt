@@ -18,7 +18,7 @@ template <class Functor> struct TaskNode : Functor {
   static_assert(std::is_same_v<std::decay_t<Functor>, Functor>);
   template <class In> TaskNode(In &&func) : Functor(std::forward<In>(func)) {
     node.svc = svc;
-    node.arg = this;
+    node.svc_arg = this;
   }
   ntt_task_node node;
 };

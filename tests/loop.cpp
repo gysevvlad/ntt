@@ -1,10 +1,11 @@
 #include "ntt/loop.h"
 #include "ntt/defs.h"
+#include "ntt/event_queue.h"
 #include "ntt/mpsc_queue.h"
 #include "ntt/node.h"
-#include "ntt/squeue.h"
 #include "ntt/task_queue.h"
 #include "ntt/thread_pool.h"
+#include "ntt/work_loop.h"
 
 #include <algorithm>
 #include <boost/asio/dispatch.hpp>
@@ -79,7 +80,7 @@ template <class Functor> struct TaskNode : Functor {
   static_assert(std::is_same_v<std::decay_t<Functor>, Functor>);
   template <class In> TaskNode(In &&func) : Functor(std::forward<In>(func)) {
     node.svc = svc;
-    node.arg = this;
+    node.svc_arg = this;
   }
   ntt_task_node node;
 };
@@ -188,7 +189,7 @@ TEST(ntt, task_queue) {
     auto *task_queue = static_cast<ntt_task_queue *>(arg);
     struct ntt_task_node *node = NULL;
     while ((node = ntt_task_queue_pop(task_queue))) {
-      node->svc(node->arg);
+      node->svc(node->svc_arg);
     }
   };
   config.complete_arg = &p;
@@ -255,9 +256,9 @@ TEST(ntt, stand) {
     std::vector<std::chrono::microseconds> fmw{g_cnt};
     std::vector<std::chrono::microseconds> fkw{g_cnt};
 
-    std::vector<ntt_squeue> recv{n};
-    std::vector<ntt_squeue> proc{m};
-    std::vector<ntt_squeue> send{k};
+    std::vector<ntt_event_queue *> recv{n};
+    std::vector<ntt_event_queue *> proc{m};
+    std::vector<ntt_event_queue *> send{k};
 
     std::vector<std::chrono::high_resolution_clock::time_point> in{g_cnt};
     std::vector<std::chrono::high_resolution_clock::time_point> out{g_cnt};
@@ -298,46 +299,37 @@ TEST(ntt, stand) {
     ctx.fkw[i] = std::chrono::microseconds{fkwd(gen)};
   }
 
-  ntt_task_queue task_queue;
-  ntt_task_queue_init(&task_queue);
-
-  for (auto &group : {&ctx.recv, &ctx.proc, &ctx.send}) {
-    for (auto &queue : *group) {
-      ntt_squeue_init(&queue, &task_queue);
-    }
-  }
-
-  ntt_thread_pool_config config{};
+  ntt_work_loop_config config{};
   config.width = g_width;
-  config.svc_arg = &task_queue;
-  config.svc_cb = [](void *arg) {
-    auto *task_queue = static_cast<ntt_task_queue *>(arg);
-    struct ntt_task_node *node = NULL;
-    while ((node = ntt_task_queue_pop(task_queue))) {
-      node->svc(node->arg);
-    }
-  };
   config.complete_arg = &p;
   config.complete_cb = [](void *arg) {
     static_cast<std::promise<void> *>(arg)->set_value();
   };
-  auto *thread_pool = ntt_thread_pool_create_from_config(&config);
-  ntt_thread_pool_release(thread_pool);
+
+  auto *work_loop = ntt_work_loop_create_from_config(&config);
+
+  for (auto &group : {&ctx.recv, &ctx.proc, &ctx.send}) {
+    for (auto &queue : *group) {
+      queue = ntt_event_queue_create(work_loop);
+    }
+  }
+
+  ntt_work_loop_release(work_loop);
 
   for (std::size_t i = 0; i < g_cnt; ++i) {
     int x = i;
     std::this_thread::sleep_for(ctx.fnw[x]);
-    ntt_squeue_dispatch(
-        &ctx.recv[ctx.fn[x]], make_sq_task_cached([ctx = &ctx, x = i] mutable {
+    ntt_event_queue_dispatch(
+        ctx.recv[ctx.fn[x]], make_sq_task_cached([ctx = &ctx, x = i] mutable {
           ctx->in[x] = std::chrono::high_resolution_clock::now();
           // std::this_thread::sleep_for(ctx->fmw[x]);
           // we are in recv queue
-          ntt_squeue_dispatch(
-              &ctx->proc[ctx->fm[x]], make_sq_task_cached([ctx, x = x] mutable {
+          ntt_event_queue_dispatch(
+              ctx->proc[ctx->fm[x]], make_sq_task_cached([ctx, x = x] mutable {
                 // std::this_thread::sleep_for(ctx->fkw[x]);
                 // we are in proc queue
-                ntt_squeue_dispatch(
-                    &ctx->send[ctx->fk[x]],
+                ntt_event_queue_dispatch(
+                    ctx->send[ctx->fk[x]],
                     make_sq_task_cached([ctx, x = x] mutable {
                       // we are in send queue
                       ctx->out[x] = std::chrono::high_resolution_clock::now();
@@ -350,9 +342,14 @@ TEST(ntt, stand) {
   }
 
   ctx.f.wait();
-  ntt_task_queue_stop(&task_queue);
+
+  for (auto &group : {&ctx.recv, &ctx.proc, &ctx.send}) {
+    for (auto &queue : *group) {
+      ntt_event_queue_release(queue);
+    }
+  }
+
   f.wait();
-  ntt_task_queue_destroy(&task_queue);
 
   std::vector<std::chrono::high_resolution_clock::duration> res(g_cnt);
   for (std::size_t i = 0; i < g_cnt; ++i) {

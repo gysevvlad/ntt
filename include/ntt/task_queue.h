@@ -9,7 +9,7 @@ EXTERN_START
 
 struct ntt_task_node {
   void (*svc)(void *);
-  void *arg;
+  void *svc_arg;
   struct ntt_task_node *next;
 };
 
