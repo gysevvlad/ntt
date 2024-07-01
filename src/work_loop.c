@@ -1,6 +1,6 @@
 #include "ntt/work_loop.h"
+#include "ntt/event_queue.h"
 #include "ntt/malloc.h"
-#include "ntt/task_queue_dep.h"
 #include "ntt/thread_pool.h"
 #include "work_loop_impl.h"
 #include <assert.h>
@@ -20,7 +20,7 @@ void ntt_work_loop_release_external_ref(struct ntt_work_loop *work_loop) {
   assert(prev > 0 && "internal error: work loop already destroyed");
 
   if (prev == 1) {
-    ntt_task_queue_dep_stop(&work_loop->task_queue_dep);
+    ntt_event_queue_stop(&work_loop->event_queue);
     ntt_thread_pool_release(work_loop->thread_pool);
     ntt_work_loop_release_internal_ref(work_loop);
   }
@@ -29,7 +29,7 @@ void ntt_work_loop_release_external_ref(struct ntt_work_loop *work_loop) {
 void ntt_work_loop_svc(void *arg) {
   struct ntt_work_loop *work_loop = arg;
   struct ntt_task_node *node = NULL;
-  while ((node = ntt_task_queue_dep_pop(&work_loop->task_queue_dep))) {
+  while ((node = ntt_event_queue_pop(&work_loop->event_queue))) {
     node->svc(node->svc_arg);
   }
   ntt_work_loop_release_internal_ref(work_loop);
@@ -53,7 +53,7 @@ ntt_work_loop_create_from_config(const struct ntt_work_loop_config *config) {
   work_loop->external_refs = 1;
   work_loop->internal_refs = config->width + 1;
 
-  ntt_task_queue_dep_init(&work_loop->task_queue_dep);
+  ntt_event_queue_init(&work_loop->event_queue);
 
   struct ntt_thread_pool_config thread_pool_config = {
       .width = config->width,
@@ -73,5 +73,5 @@ ntt_work_loop_create_from_config(const struct ntt_work_loop_config *config) {
 
 void ntt_work_loop_dispatch(struct ntt_work_loop *work_loop,
                             struct ntt_task_node *task_node) {
-  ntt_task_queue_dep_push(&work_loop->task_queue_dep, task_node);
+  ntt_event_queue_push(&work_loop->event_queue, task_node);
 }

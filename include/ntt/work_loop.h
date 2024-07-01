@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ntt/defs.h"
-#include "ntt/task_queue_dep.h"
+#include "ntt/event_queue.h"
 
 EXTERN_START
 

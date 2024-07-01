@@ -3,7 +3,7 @@
 #include "ntt/malloc.h"
 #include "ntt/mpsc_queue.h"
 #include "ntt/node.h"
-#include "ntt/task_queue_dep.h"
+#include "ntt/event_queue.h"
 #include "ntt/work_loop.h"
 #include "task_queue_impl.h"
 #include "work_loop_impl.h"
@@ -14,7 +14,7 @@ thread_local struct ntt_task_queue *t_next_queue;
 thread_local struct ntt_task_queue *t_curr_queue;
 thread_local struct ntt_sq_task *t_curr_task;
 
-void ntt_event_queue_svc(void *arg) {
+void ntt_task_queue_svc(void *arg) {
   struct ntt_task_queue *task_queue = arg;
   struct ntt_node *mpsc_queue_node = NULL;
   int last = 0;
@@ -31,7 +31,7 @@ void ntt_event_queue_svc(void *arg) {
   } while (last == 0);
   if (t_next_queue != NULL) {
     // TODO: avoid recursion
-    ntt_event_queue_svc(t_next_queue);
+    ntt_task_queue_svc(t_next_queue);
   }
   t_curr_queue = NULL;
 }
@@ -48,7 +48,7 @@ ntt_task_queue_create(struct ntt_work_loop *work_loop) {
   task_queue->work_loop = ntt_work_loop_acquire(work_loop);
 
   task_queue->task_node.svc_arg = task_queue;
-  task_queue->task_node.svc = ntt_event_queue_svc;
+  task_queue->task_node.svc = ntt_task_queue_svc;
 
   return task_queue;
 }
@@ -85,7 +85,7 @@ void ntt_task_queue_dispatch(struct ntt_task_queue *task_queue,
         }
       }
     }
-    ntt_task_queue_dep_push(&task_queue->work_loop->task_queue_dep,
+    ntt_event_queue_push(&task_queue->work_loop->event_queue,
                             &task_queue->task_node);
     return;
   }

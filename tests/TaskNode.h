@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ntt/task_queue_dep.h"
+#include "ntt/event_queue.h"
 
 #include <type_traits>
 #include <utility>
