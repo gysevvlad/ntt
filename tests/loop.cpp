@@ -79,7 +79,7 @@ template <class Functor> struct Event : Functor {
   }
   static_assert(std::is_same_v<std::decay_t<Functor>, Functor>);
   template <class In> Event(In &&func) : Functor(std::forward<In>(func)) {
-    event.svc = svc;
+    event.svc_cb = svc;
     event.svc_arg = this;
   }
   ntt_event event;
@@ -188,7 +188,7 @@ TEST(ntt, task_queue_dep) {
     auto *event_queue = static_cast<ntt_event_queue *>(arg);
     struct ntt_event *event = NULL;
     while ((event = ntt_event_queue_pop(event_queue))) {
-      event->svc(event->svc_arg);
+      event->svc_cb(event->svc_arg);
     }
   };
   config.complete_arg = &p;

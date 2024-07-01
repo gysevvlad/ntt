@@ -17,7 +17,7 @@ template <class Functor> struct Event : Functor {
   }
   static_assert(std::is_same_v<std::decay_t<Functor>, Functor>);
   template <class In> Event(In &&func) : Functor(std::forward<In>(func)) {
-    event.svc = svc;
+    event.svc_cb = svc;
     event.svc_arg = this;
   }
   ntt_event event;

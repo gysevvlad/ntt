@@ -30,7 +30,7 @@ void ntt_work_loop_svc(void *arg) {
   struct ntt_work_loop *work_loop = arg;
   struct ntt_event *event = NULL;
   while ((event = ntt_event_queue_pop(&work_loop->event_queue))) {
-    event->svc(event->svc_arg);
+    event->svc_cb(event->svc_arg);
   }
   ntt_work_loop_release_internal_ref(work_loop);
 }

@@ -48,7 +48,7 @@ ntt_task_queue_create(struct ntt_work_loop *work_loop) {
   task_queue->work_loop = ntt_work_loop_acquire(work_loop);
 
   task_queue->event.svc_arg = task_queue;
-  task_queue->event.svc = ntt_task_queue_svc;
+  task_queue->event.svc_cb = ntt_task_queue_svc;
 
   return task_queue;
 }

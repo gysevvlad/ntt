@@ -8,14 +8,14 @@
 EXTERN_START
 
 struct ntt_event {
-  void (*svc)(void *);
+  void (*svc_cb)(void *svc_arg);
   void *svc_arg;
   struct ntt_event *next;
 };
 
 struct ntt_event_queue {
-  mtx_t m;
-  cnd_t c;
+  mtx_t mtx;
+  cnd_t cnd;
   struct ntt_event head;
   struct ntt_event *tail;
   int stopped;
