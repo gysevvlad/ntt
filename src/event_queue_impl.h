@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ntt/mpsc_queue.h"
-#include "ntt/task_queue.h"
+#include "ntt/task_queue_dep.h"
 #include "work_loop_impl.h"
 
 #include <stdatomic.h>

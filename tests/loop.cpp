@@ -3,7 +3,7 @@
 #include "ntt/event_queue.h"
 #include "ntt/mpsc_queue.h"
 #include "ntt/node.h"
-#include "ntt/task_queue.h"
+#include "ntt/task_queue_dep.h"
 #include "ntt/thread_pool.h"
 #include "ntt/work_loop.h"
 
@@ -174,21 +174,21 @@ template <class Functor> ntt_sq_task *make_sq_task(Functor &&functor) {
   return &node->serial_queue_task;
 }
 
-TEST(ntt, task_queue) {
+TEST(ntt, task_queue_dep) {
   static constexpr std::size_t g_width = 8;
   std::promise<void> p;
   auto f = p.get_future();
 
-  ntt_task_queue task_queue;
-  ntt_task_queue_init(&task_queue);
+  ntt_task_queue_dep task_queue_dep;
+  ntt_task_queue_dep_init(&task_queue_dep);
 
   ntt_thread_pool_config config{};
   config.width = g_width;
-  config.svc_arg = &task_queue;
+  config.svc_arg = &task_queue_dep;
   config.svc_cb = [](void *arg) {
-    auto *task_queue = static_cast<ntt_task_queue *>(arg);
+    auto *task_queue_dep = static_cast<ntt_task_queue_dep *>(arg);
     struct ntt_task_node *node = NULL;
-    while ((node = ntt_task_queue_pop(task_queue))) {
+    while ((node = ntt_task_queue_dep_pop(task_queue_dep))) {
       node->svc(node->svc_arg);
     }
   };
@@ -203,9 +203,9 @@ TEST(ntt, task_queue) {
   std::atomic<std::size_t> cnt = 0;
   std::promise<void> done;
   auto future = done.get_future();
-  ntt_task_queue_push(&task_queue, make_task([&] {
+  ntt_task_queue_dep_push(&task_queue_dep, make_task([&] {
     for (std::size_t i = 0; i < g_expected_cnt; ++i) {
-      ntt_task_queue_push(&task_queue, make_task([&] {
+      ntt_task_queue_dep_push(&task_queue_dep, make_task([&] {
         for (std::size_t i = 0; i < g_expected_cnt; ++i) {
           __asm__("nop");
         }
@@ -217,9 +217,9 @@ TEST(ntt, task_queue) {
   }));
 
   future.wait();
-  ntt_task_queue_stop(&task_queue);
+  ntt_task_queue_dep_stop(&task_queue_dep);
   f.wait();
-  ntt_task_queue_destroy(&task_queue);
+  ntt_task_queue_dep_destroy(&task_queue_dep);
 }
 
 static constexpr std::size_t g_cnt = 100'000;

@@ -4,7 +4,7 @@
 #include "ntt/malloc.h"
 #include "ntt/mpsc_queue.h"
 #include "ntt/node.h"
-#include "ntt/task_queue.h"
+#include "ntt/task_queue_dep.h"
 #include "ntt/work_loop.h"
 #include "work_loop_impl.h"
 
@@ -86,7 +86,7 @@ void ntt_event_queue_dispatch(struct ntt_event_queue *sq,
         }
       }
     }
-    ntt_task_queue_push(&sq->work_loop->task_queue, &sq->task_node);
+    ntt_task_queue_dep_push(&sq->work_loop->task_queue_dep, &sq->task_node);
     return;
   }
 }

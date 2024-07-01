@@ -3,6 +3,7 @@
 #include "ntt/defs.h"
 #include "ntt/node.h"
 #include "ntt/work_loop.h"
+#include "ntt/export.h"
 
 EXTERN_START
 
