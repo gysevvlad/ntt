@@ -19,6 +19,7 @@
 #include <future>
 #include <gtest/gtest.h>
 #include <random>
+#include <sys/wait.h>
 #include <thread>
 #include <type_traits>
 #include <urcu/wfcqueue.h>
@@ -231,9 +232,20 @@ static constexpr std::chrono::microseconds g_recv_work{5};
 static constexpr std::chrono::microseconds g_recv_noise{2};
 static constexpr std::chrono::microseconds g_proc_work{10};
 static constexpr std::chrono::microseconds g_proc_noise{2};
+static constexpr std::size_t g_width = 4;
+static std::array<int, g_width> g_affinity = {12, 14, 16, 18};
+
+void set_affinity(int i) {
+  int s;
+  cpu_set_t cpuset;
+  pthread_t thread;
+  thread = pthread_self();
+  CPU_ZERO(&cpuset);
+  CPU_SET(i, &cpuset);
+  pthread_setaffinity_np(thread, sizeof(cpuset), &cpuset);
+}
 
 TEST(ntt, stand) {
-  static constexpr std::size_t g_width = 8;
   std::promise<void> p;
   auto f = p.get_future();
 
@@ -300,6 +312,10 @@ TEST(ntt, stand) {
 
   ntt_work_loop_config config{};
   config.width = g_width;
+  config.configure_arg = &g_affinity;
+  config.configure_cb = [](void *arg, unsigned i) {
+    set_affinity(static_cast<std::array<int, g_width> *>(arg)->at(i));
+  };
   config.complete_arg = &p;
   config.complete_cb = [](void *arg) {
     static_cast<std::promise<void> *>(arg)->set_value();
@@ -313,33 +329,38 @@ TEST(ntt, stand) {
     }
   }
 
-  ntt_work_loop_release(work_loop);
-
   for (std::size_t i = 0; i < g_cnt; ++i) {
     int x = i;
     std::this_thread::sleep_for(ctx.fnw[x]);
     ctx.in[x] = std::chrono::high_resolution_clock::now();
-    ntt_task_queue_dispatch(
-        ctx.recv[ctx.fn[x]], make_sq_task_cached([ctx = &ctx, x = i] mutable {
-          // ctx->in[x] = std::chrono::high_resolution_clock::now();
-          // std::this_thread::sleep_for(ctx->fmw[x]);
-          // we are in recv queue
+    ntt_work_loop_dispatch(
+        work_loop, make_event([ctx = &ctx, x = i] {
           ntt_task_queue_dispatch(
-              ctx->proc[ctx->fm[x]], make_sq_task_cached([ctx, x = x] mutable {
-                // std::this_thread::sleep_for(ctx->fkw[x]);
-                // we are in proc queue
+              ctx->recv[ctx->fn[x]], make_sq_task_cached([ctx, x] mutable {
+                // ctx->in[x] = std::chrono::high_resolution_clock::now();
+                // std::this_thread::sleep_for(ctx->fmw[x]);
+                // we are in recv queue
                 ntt_task_queue_dispatch(
-                    ctx->send[ctx->fk[x]],
+                    ctx->proc[ctx->fm[x]],
                     make_sq_task_cached([ctx, x = x] mutable {
-                      // we are in send queue
-                      ctx->out[x] = std::chrono::high_resolution_clock::now();
-                      if (ctx->done_cnt.fetch_add(1) == g_cnt - 1) {
-                        ctx->done.set_value();
-                      }
+                      // std::this_thread::sleep_for(ctx->fkw[x]);
+                      // we are in proc queue
+                      ntt_task_queue_dispatch(
+                          ctx->send[ctx->fk[x]],
+                          make_sq_task_cached([ctx, x = x] mutable {
+                            // we are in send queue
+                            ctx->out[x] =
+                                std::chrono::high_resolution_clock::now();
+                            if (ctx->done_cnt.fetch_add(1) == g_cnt - 1) {
+                              ctx->done.set_value();
+                            }
+                          }));
                     }));
               }));
         }));
   }
+
+  ntt_work_loop_release(work_loop);
 
   ctx.f.wait();
 
