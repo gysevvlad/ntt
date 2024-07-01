@@ -329,12 +329,12 @@ TEST(ntt, stand) {
     }
   }
 
-  for (std::size_t i = 0; i < g_cnt; ++i) {
-    int x = i;
-    std::this_thread::sleep_for(ctx.fnw[x]);
-    ctx.in[x] = std::chrono::high_resolution_clock::now();
-    ntt_work_loop_dispatch(
-        work_loop, make_event([ctx = &ctx, x = i] {
+  ntt_work_loop_dispatch(
+      work_loop, make_event([ctx = &ctx] {
+        for (std::size_t i = 0; i < g_cnt; ++i) {
+          auto x = i;
+          std::this_thread::sleep_for(ctx->fnw[x]);
+          ctx->in[x] = std::chrono::high_resolution_clock::now();
           ntt_task_queue_dispatch(
               ctx->recv[ctx->fn[x]], make_sq_task_cached([ctx, x] mutable {
                 // ctx->in[x] = std::chrono::high_resolution_clock::now();
@@ -357,8 +357,8 @@ TEST(ntt, stand) {
                           }));
                     }));
               }));
-        }));
-  }
+        }
+      }));
 
   ntt_work_loop_release(work_loop);
 
