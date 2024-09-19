@@ -2,7 +2,7 @@
 
 #include "ntt/defs.h"
 #include "ntt/export.h"
-#include "ntt/node.h"
+#include "ntt/node_dep.h"
 #include "ntt/work_loop.h"
 
 EXTERN_START
@@ -11,7 +11,7 @@ struct ntt_sq_task {
   void (*svc)(void *arg);
   void (*del)(void *arg);
   void *arg;
-  struct ntt_node node;
+  struct ntt_forward_node node;
 };
 
 NTT_EXPORT struct ntt_task_queue *

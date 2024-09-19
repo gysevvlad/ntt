@@ -1,4 +1,5 @@
 #include "ntt/loop.h"
+#include <pthread.h>
 
 void ntt_loop_actions_on_event(struct ntt_epoll_fd *epoll_fd, int event) {
   struct ntt_event_loop *loop =

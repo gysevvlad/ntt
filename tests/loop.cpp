@@ -2,12 +2,11 @@
 #include "ntt/defs.h"
 #include "ntt/event_queue.h"
 #include "ntt/mpsc_queue.h"
-#include "ntt/node.h"
+#include "ntt/node_dep.h"
 #include "ntt/task_queue.h"
 #include "ntt/thread_pool.h"
 #include "ntt/work_loop.h"
 
-#include <algorithm>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/execution_context.hpp>
 #include <boost/asio/executor_work_guard.hpp>
@@ -117,7 +116,7 @@ template <class Functor> struct SerialQueueTaskNodePool {
   SerialQueueTaskNodePool() { m_node.next = NULL; }
   SerialQueueTaskNode<Functor> *get() {
     if (auto node = alloc()) {
-      ntt_node *t1 = ntt_container_of(node, ntt_node, node);
+      ntt_forward_node *t1 = ntt_container_of(node, ntt_forward_node, node);
       ntt_sq_task *t2 = ntt_container_of(t1, ntt_sq_task, node);
       return ntt_container_of(t2, SerialQueueTaskNode<Functor>,
                               serial_queue_task);

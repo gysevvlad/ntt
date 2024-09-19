@@ -2,7 +2,7 @@
 #include "ntt/defs.h"
 #include "ntt/malloc.h"
 #include "ntt/mpsc_queue.h"
-#include "ntt/node.h"
+#include "ntt/node_dep.h"
 #include "ntt/event_queue.h"
 #include "ntt/work_loop.h"
 #include "task_queue_impl.h"
@@ -16,7 +16,7 @@ thread_local struct ntt_sq_task *t_curr_task;
 
 void ntt_task_queue_svc(void *arg) {
   struct ntt_task_queue *task_queue = arg;
-  struct ntt_node *mpsc_queue_node = NULL;
+  struct ntt_forward_node *mpsc_queue_node = NULL;
   int last = 0;
   t_next_queue = NULL;
   t_curr_queue = task_queue;
@@ -30,7 +30,7 @@ void ntt_task_queue_svc(void *arg) {
     serial_queue_task->del(serial_queue_task->arg);
   } while (last == 0);
   if (t_next_queue != NULL) {
-    // TODO: avoid recursion
+    // TDO: avoid recursion
     ntt_task_queue_svc(t_next_queue);
   }
   t_curr_queue = NULL;

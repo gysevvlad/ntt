@@ -1,0 +1,3 @@
+#!/bin/sh
+
+grep -or --no-filename --exclude='todo' "TODO:\(.*\)" | sort | uniq

@@ -9,7 +9,7 @@ void ntt_cqueue_init(struct ntt_cqueue *queue) {
   DEBUG_ASSERT(rc == 0);
 }
 
-void ntt_cqueue_push(struct ntt_cqueue *queue, struct ntt_node *node) {
+void ntt_cqueue_push(struct ntt_cqueue *queue, struct ntt_forward_node *node) {
   ntt_mpsc_queue_push(&queue->queue, node);
 }
 

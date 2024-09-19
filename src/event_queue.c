@@ -16,13 +16,13 @@ void ntt_event_queue_push(struct ntt_event_queue *event_queue,
   mtx_lock(&event_queue->mtx);
   event_queue->tail->next = event;
   event_queue->tail = event;
-  mtx_unlock(&event_queue->mtx);
   cnd_signal(&event_queue->cnd);
+  mtx_unlock(&event_queue->mtx);
 }
 
 void ntt_event_queue_stop(struct ntt_event_queue *event_queue) {
   mtx_lock(&event_queue->mtx);
-  assert(task_queue->stopped == 0 &&
+  assert(event_queue->stopped == 0 &&
          "internal error: task queue already stopped");
   event_queue->stopped = 1;
   cnd_broadcast(&event_queue->cnd);
