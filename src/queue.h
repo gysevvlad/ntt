@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ntt/node.h"
+#include "./node.h"
 
 #include <stddef.h>
 

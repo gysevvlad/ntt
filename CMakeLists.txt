@@ -14,7 +14,7 @@ set_target_properties(ntt
   PROPERTIES
     C_STANDARD 23
     C_STANDARD_REQUIRED on
-    C_EXTENSIONS on
+    C_EXTENSIONS off
     C_VISIBILITY_PRESET hidden
     POSITION_INDEPENDENT_CODE true
     INTERPROCEDURAL_OPTIMIZATION true)
@@ -26,38 +26,21 @@ generate_export_header(ntt EXPORT_FILE_NAME include/ntt/export.h)
 # ntt sources
 target_sources(ntt
   PRIVATE
-    src/event_queue.c
-    src/loop.c
-    src/malloc.c
-    src/mpsc_queue.c
-    src/pool.c
     src/task.c
-    src/signal.c
-    src/signal_cv.c
-    src/task_queue.c
-    src/thread_pool.c
-    src/work_loop.c
   PUBLIC
     FILE_SET ntt_public_headers
     TYPE HEADERS
     FILES
       ${CMAKE_CURRENT_BINARY_DIR}/include/ntt/export.h
       include/ntt/defs.h
-      include/ntt/event_queue.h
-      include/ntt/loop.h
-      include/ntt/malloc.h
-      include/ntt/mpsc_queue.h
-      include/ntt/pool.h
-      include/ntt/signal.h
       include/ntt/task.h
-      include/ntt/task_queue.h
-      include/ntt/thread_pool.h
-      include/ntt/work_loop.h
     BASE_DIRS
       ${CMAKE_CURRENT_BINARY_DIR}/include
       include)
 
 # links
+
+# TODO: cmake dependency management
 include(FindPkgConfig)
 pkg_search_module(liburcu-cds REQUIRED IMPORTED_TARGET liburcu-cds)
 find_package(Threads REQUIRED)
@@ -91,17 +74,16 @@ add_test(NAME internal_tests COMMAND ntt_internal_tests)
 #[[ unit tests ]]#
 
 add_executable(ntt_unit_tests
-  tests/thread_pool.cpp
-  tests/work_loop.cpp
   tests/task.cpp)
 
 set_target_properties(
   ntt_unit_tests
   PROPERTIES
     CXX_STANDARD 23
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF)
+    CXX_STANDARD_REQUIRED on
+    CXX_EXTENSIONS off)
 
+# TODO: cmake dependency management
 find_package(GTest)
 find_package(Boost)
 pkg_search_module(jemalloc REQUIRED IMPORTED_TARGET jemalloc)
