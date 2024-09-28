@@ -42,9 +42,8 @@ target_sources(ntt
 
 # TODO: cmake dependency management
 include(FindPkgConfig)
-pkg_search_module(liburcu-cds REQUIRED IMPORTED_TARGET liburcu-cds)
 find_package(Threads REQUIRED)
-target_link_libraries(ntt PUBLIC PkgConfig::liburcu-cds PRIVATE Threads::Threads)
+target_link_libraries(ntt PUBLIC PRIVATE Threads::Threads)
 
 
 #[[ static ntt lib ]]#
