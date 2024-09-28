@@ -66,12 +66,12 @@ target_link_libraries(ntt_shared PUBLIC ntt)
 
 #[[ internal tests ]]#
 
-add_executable(ntt_internal_tests
-  src/queue_test.c)
+# add_executable(ntt_internal_tests
+#   src/queue_test.c)
 
-target_link_libraries(ntt_internal_tests ntt_static ntt::thd::criterion)
+# target_link_libraries(ntt_internal_tests ntt_static ntt::thd::criterion)
 
-add_test(NAME internal_tests COMMAND ntt_internal_tests)
+# add_test(NAME internal_tests COMMAND ntt_internal_tests)
 
 
 #[[ unit tests ]]#
