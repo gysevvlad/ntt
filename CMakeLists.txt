@@ -27,6 +27,7 @@ generate_export_header(ntt EXPORT_FILE_NAME include/ntt/export.h)
 target_sources(ntt
   PRIVATE
     src/pool.c
+    src/queue.c
     src/task.c
     src/task_queue.c
   PUBLIC
@@ -92,8 +93,8 @@ set_target_properties(
 find_package(GTest)
 find_package(Boost)
 pkg_search_module(jemalloc REQUIRED IMPORTED_TARGET jemalloc)
-# target_link_libraries(ntt_unit_tests PkgConfig::jemalloc ntt_shared Boost::headers GTest::gtest_main GTest::gtest)
-target_link_libraries(ntt_unit_tests ntt_shared Boost::headers GTest::gtest_main GTest::gtest)
+target_link_libraries(ntt_unit_tests PkgConfig::jemalloc ntt_shared Boost::headers GTest::gtest_main GTest::gtest)
+target_link_libraries(ntt_unit_tests ntt_static Boost::headers GTest::gtest_main GTest::gtest)
 
 add_test(NAME unit_tests COMMAND ntt_unit_tests)
 

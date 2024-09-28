@@ -23,13 +23,13 @@ int ntt_pool_svc(void *arg) {
     if (task_node->cb == NULL) {
       break;
     }
+    // TODO: queue memory management
     task_node->cb(task_node->payload);
-    free(task_node);
   }
 
   size_t prev = atomic_fetch_sub(&pool->internal_refs, 1);
   if (prev == 1) {
-    assert(ntt_queue_empty(&pool->task_queue.queue));
+    assert(ntt_list_empty(&pool->task_queue.queue));
     ntt_pool_destroy(pool);
     free(pool);
   }
