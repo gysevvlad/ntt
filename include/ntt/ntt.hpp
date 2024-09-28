@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ntt/task.h"
+#include "ntt/ntt.h"
 
 #include <memory>
 #include <type_traits>

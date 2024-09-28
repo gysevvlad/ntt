@@ -9,15 +9,15 @@
 typedef struct ntt_task_node {
   ntt_node_t node;
   ntt_task_cb_t *cb;
-  char payload[48];
+  char payload[40];
 } ntt_task_node_t;
 
-static inline ntt_task_t *ntt_make_task_inl(ntt_task_cb_t *cb) {
+static inline ntt_task_node_t *ntt_make_task_impl(ntt_task_cb_t *cb) {
   ntt_task_node_t *task_node = malloc(sizeof(ntt_task_node_t));
   assert(ntt_is_aligned(&task_node->payload, NTT_TASK_PAYLOAD_ALIGN) &&
          "ntt exception: wrong assumption about task payload alignment");
   task_node->cb = cb;
-  return &task_node->payload;
+  return task_node;
 }
 
 static inline void ntt_do_task_inl(ntt_task_t *task) {

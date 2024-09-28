@@ -26,14 +26,18 @@ generate_export_header(ntt EXPORT_FILE_NAME include/ntt/export.h)
 # ntt sources
 target_sources(ntt
   PRIVATE
+    src/pool.c
     src/task.c
+    src/task_queue.c
   PUBLIC
     FILE_SET ntt_public_headers
     TYPE HEADERS
     FILES
       ${CMAKE_CURRENT_BINARY_DIR}/include/ntt/export.h
       include/ntt/defs.h
+      include/ntt/pool.h
       include/ntt/task.h
+      include/ntt/task_queue.h
     BASE_DIRS
       ${CMAKE_CURRENT_BINARY_DIR}/include
       include)
@@ -73,7 +77,9 @@ add_test(NAME internal_tests COMMAND ntt_internal_tests)
 #[[ unit tests ]]#
 
 add_executable(ntt_unit_tests
-  tests/task.cpp)
+  tests/pool.cpp
+  tests/task.cpp
+  tests/task_queue.cpp)
 
 set_target_properties(
   ntt_unit_tests

@@ -10,7 +10,7 @@ EXTERN_START
  *
  * TODO: dynamic task payload size
  */
-#define NTT_TASK_PAYLOAD_SIZE 48
+#define NTT_TASK_PAYLOAD_SIZE 40
 
 /**
  * @brief Alignment of task payload.
@@ -20,7 +20,7 @@ EXTERN_START
  *
  * TODO: over-aligned task payload data
  */
-#define NTT_TASK_PAYLOAD_ALIGN 16
+#define NTT_TASK_PAYLOAD_ALIGN 8
 
 /**
  * @brief Task callback.

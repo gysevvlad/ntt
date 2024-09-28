@@ -1,11 +1,8 @@
 #include "ntt/ntt.hpp"
 
-#include <cstdlib>
 #include <gtest/gtest.h>
 
 #include <future>
-#include <memory>
-#include <type_traits>
 
 TEST(Task, Common) {
   std::promise<int> promise;
@@ -15,6 +12,14 @@ TEST(Task, Common) {
   ntt::do_task(task);
   ntt::free_task(task);
   ASSERT_EQ(future.get(), 9);
+}
+
+TEST(NttTaskTest, DoTask) {
+  int v = 0;
+  auto task = ntt::make_task([&] { v = 1; });
+  ntt::do_task(task);
+  ntt::free_task(task);
+  EXPECT_EQ(v, 1);
 }
 
 template <class T> bool is_aligned(const void *ptr) noexcept {
