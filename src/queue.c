@@ -1,9 +1,8 @@
 #include "ntt/queue.h"
 
-#include "./list.h"
-#include "./task_inl.h"
-
 #include "ntt/defs.h"
+#include "ntt/impl/list.h"
+#include "ntt/impl/task.h"
 #include "ntt/pool.h"
 
 #include <stdatomic.h>
@@ -30,7 +29,7 @@ static void svc(void *payload) {
   do {
     ntt_node_t *node = self->list.node.prev;
     ntt_task_node_t *task_node = ntt_container_of(node, ntt_task_node_t, node);
-    task_node->cb(task_node->payload);
+    task_node->task_cb(task_node->payload);
     if (t_next_queue != NULL) {
       // ctx switch
       mtx_lock(&self->mtx);
@@ -59,7 +58,7 @@ ntt_queue_t *ntt_queue_create(ntt_pool_t *pool) {
   self->pool = pool;
   ntt_pool_acquire(self->pool);
   mtx_init(&self->mtx, mtx_plain);
-  self->svc_task.cb = svc;
+  self->svc_task.task_cb = svc;
   return self;
 }
 

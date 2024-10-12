@@ -1,7 +1,9 @@
-#include "./task_inl.h"
+#include "ntt/task.h"
 
-ntt_task_t *ntt_make_task(ntt_task_cb_t *cb) {
-  return &ntt_make_task_impl(cb)->payload;
+#include "ntt/impl/task.h"
+
+ntt_task_t *ntt_make_task(ntt_task_cb_t *task_cb, ntt_free_cb_t *free_cb) {
+  return &ntt_make_task_impl(task_cb, free_cb)->payload;
 }
 
 void ntt_do_task(ntt_task_t *task) { return ntt_do_task_inl(task); }

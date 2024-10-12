@@ -1,6 +1,6 @@
 #pragma once
 
-#include "./node.h"
+#include "ntt/impl/node.h"
 
 #include <stddef.h>
 
@@ -28,6 +28,10 @@ static inline void ntt_list_push_back(ntt_list_t *queue, ntt_node_t *node,
   next->prev = node;
   node->next = next;
   node->prev = prev;
+}
+
+static inline ntt_node_t *ntt_list_front(ntt_list_t *list) {
+  return list->node.prev;
 }
 
 static inline ntt_node_t *ntt_list_pop_front(ntt_list_t *queue, int *last) {

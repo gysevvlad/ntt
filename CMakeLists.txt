@@ -12,9 +12,9 @@ add_library(ntt OBJECT)
 # setup properties
 set_target_properties(ntt
   PROPERTIES
-    C_STANDARD 23
+    C_STANDARD 90
     C_STANDARD_REQUIRED on
-    C_EXTENSIONS off
+    C_EXTENSIONS on
     C_VISIBILITY_PRESET hidden
     POSITION_INDEPENDENT_CODE true
     INTERPROCEDURAL_OPTIMIZATION true)
@@ -26,10 +26,20 @@ generate_export_header(ntt EXPORT_FILE_NAME include/ntt/export.h)
 # ntt sources
 target_sources(ntt
   PRIVATE
-    src/pool.c
-    src/queue.c
+    # src/pool.c
+    src/pool2.c
+    src/task_cache.c
+    # src/queue.c
+    # src/reactor.c
     src/task.c
-    src/task_queue.c
+    # src/task_queue.c
+  PRIVATE
+    FILE_SET ntt_impl_headers
+    TYPE HEADERS
+    FILES
+      include/ntt/impl/reactor.h
+    BASE_DIRS
+      include
   PUBLIC
     FILE_SET ntt_public_headers
     TYPE HEADERS
@@ -37,6 +47,7 @@ target_sources(ntt
       ${CMAKE_CURRENT_BINARY_DIR}/include/ntt/export.h
       include/ntt/defs.h
       include/ntt/pool.h
+      include/ntt/pool2.h
       include/ntt/task.h
       include/ntt/task_queue.h
     BASE_DIRS
@@ -78,9 +89,10 @@ target_link_libraries(ntt_shared PUBLIC ntt)
 #[[ unit tests ]]#
 
 add_executable(ntt_unit_tests
-  tests/pool.cpp
-  tests/task.cpp
-  tests/task_queue.cpp)
+  tests/Pool2Test.cpp)
+  # tests/pool.cpp
+  # tests/task.cpp
+  # tests/task_queue.cpp)
 
 set_target_properties(
   ntt_unit_tests

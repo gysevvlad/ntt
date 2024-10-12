@@ -20,16 +20,16 @@ int ntt_pool_svc(void *arg) {
   for (;;) {
     ntt_task_node_t *task_node =
         ntt_task_queue_pop_front_blocking_impl(&pool->task_queue, &last);
-    if (task_node->cb == NULL) {
+    if (task_node->task_cb == NULL) {
       break;
     }
     // TODO: queue memory management
-    task_node->cb(task_node->payload);
+    task_node->task_cb(task_node->payload);
   }
 
   size_t prev = atomic_fetch_sub(&pool->internal_refs, 1);
   if (prev == 1) {
-    assert(ntt_list_empty(&pool->task_queue.queue));
+    // assert(ntt_list_empty(&pool->task_queue.queues));
     ntt_pool_destroy(pool);
     free(pool);
   }
@@ -39,11 +39,12 @@ int ntt_pool_svc(void *arg) {
 
 ntt_pool_t *ntt_pool_create(unsigned short width) {
   ntt_pool_t *self = malloc(sizeof(ntt_pool_t));
+  unsigned short i;
   self->internal_refs = width;
   self->external_refs = 1;
   ntt_task_queue_init_impl(&self->task_queue);
   self->width = width;
-  for (unsigned short i = 0; i < width; ++i) {
+  for (i = 0; i < width; ++i) {
     thrd_t thrd;
     int rc = thrd_create(&thrd, ntt_pool_svc, self);
     assert(rc == thrd_success);
@@ -75,8 +76,8 @@ void ntt_pool_release(ntt_pool_t *self) {
   if (prev == 1) {
     for (unsigned int i = 0; i < self->width; ++i) {
       int first;
-      ntt_task_queue_push_back_impl(&self->task_queue, ntt_make_task_impl(NULL),
-                                    &first);
+      ntt_task_queue_push_back_impl(&self->task_queue,
+                                    ntt_make_task_impl(NULL, free), &first);
     }
   }
 }

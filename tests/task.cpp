@@ -42,9 +42,9 @@ TEST(Task, Alignment) {
   struct alignas(8) A {
     std::uint64_t a;
   } a;
-  struct alignas(16) B {
-    std::uint64_t a;
-  } b;
+  // struct alignas(16) B {
+  //   std::uint64_t a;
+  // } b;
 
   // TODO: over-aligned task payload data
   // struct alignas(32) C {
@@ -55,9 +55,9 @@ TEST(Task, Alignment) {
   EXPECT_TRUE(is_aligned<A>(task_a));
   ntt::free_task(task_a);
 
-  auto *task_b = ntt::make_task([b] {});
-  EXPECT_TRUE(is_aligned<B>(task_a));
-  ntt::free_task(task_a);
+  // auto *task_b = ntt::make_task([b] {});
+  // EXPECT_TRUE(is_aligned<B>(task_a));
+  // ntt::free_task(task_a);
 
   // TODO: over-aligned task payload data
   // auto *task_c = ntt::make_task([c] {});

@@ -10,7 +10,7 @@ EXTERN_START
  *
  * TODO: dynamic task payload size
  */
-#define NTT_TASK_PAYLOAD_SIZE 40
+#define NTT_TASK_PAYLOAD_SIZE 38
 
 /**
  * @brief Alignment of task payload.
@@ -28,6 +28,11 @@ EXTERN_START
 typedef void(ntt_task_cb_t)(void *payload);
 
 /**
+ * @brief Free callback.
+ */
+typedef void(ntt_free_cb_t)(void *ptr);
+
+/**
  * @brief Opaque task structure.
  */
 typedef void ntt_task_t;
@@ -38,7 +43,8 @@ typedef void ntt_task_t;
  * TODO: dynamic task payload size
  * TODO: over-aligned task payload data
  */
-NTT_EXPORT ntt_task_t *ntt_make_task(ntt_task_cb_t *cb);
+NTT_EXPORT ntt_task_t *ntt_make_task(ntt_task_cb_t *task_cb,
+                                     ntt_free_cb_t *free_cb);
 
 /**
  * @brief Do task.
