@@ -1,6 +1,9 @@
+#include "ntt/pool2.h"
 #include "ntt/ntt.hpp"
+#include "ntt/queue.h"
 
 #include <boost/asio.hpp>
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/executor_work_guard.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/strand.hpp>
@@ -271,4 +274,73 @@ TEST(Pool2, Run3BoostDispatch) {
   future.wait();
   work_guard.reset();
   std::cout << g_cnt << std::endl;
+}
+
+TEST(Pool2, Queue1) {
+  static constexpr std::size_t qs_count = 128;
+  static constexpr std::size_t gs_task_count = 1024;
+  static constexpr std::size_t task_count = qs_count * gs_task_count;
+  auto *pool = ntt_pool2_create(4);
+  std::vector<ntt_queue_t *> qs;
+  qs.reserve(qs_count);
+  for (std::size_t i = 0; i < qs_count; ++i) {
+    qs.emplace_back(ntt_queue_create(pool));
+  }
+  std::atomic<int> g_cnt;
+  std::vector<std::size_t> queues_task_count;
+  queues_task_count.resize(qs_count, 0);
+  std::promise<void> promise;
+  auto future = promise.get_future();
+  for (std::size_t i = 0; i < gs_task_count; ++i) {
+    for (std::size_t j = 0; j < qs_count; ++j) {
+      ntt::post(qs[j],
+                [&promise, &g_cnt, counter = &queues_task_count[j]] mutable {
+                  *counter += 1;
+                  if (*counter == gs_task_count) {
+                    if (g_cnt.fetch_add(1) == qs_count - 1) {
+                      promise.set_value();
+                    }
+                  }
+                });
+    }
+  }
+  future.wait();
+}
+
+TEST(Pool2, QueueDispatch1) {
+  static constexpr std::size_t width = 4;
+  static constexpr std::size_t qs_count = 128;
+  static constexpr std::size_t qs_task_count = 1024;
+  boost::asio::io_context pool;
+  auto work_guard = boost::asio::make_work_guard(pool);
+  std::vector<std::jthread> threads;
+  for (std::size_t i = 0; i < width; ++i) {
+    threads.emplace_back([&pool] { pool.run(); });
+    threads.back().detach();
+  }
+  std::vector<boost::asio::strand<boost::asio::any_io_executor>> qs;
+  qs.reserve(qs_count);
+  for (std::size_t i = 0; i < qs_count; ++i) {
+    qs.emplace_back(boost::asio::make_strand(pool));
+  }
+  std::atomic<int> g_cnt;
+  std::vector<std::size_t> queues_task_count;
+  queues_task_count.resize(qs_count, 0);
+  std::promise<void> promise;
+  auto future = promise.get_future();
+  for (std::size_t i = 0; i < qs_task_count; ++i) {
+    for (std::size_t j = 0; j < qs_count; ++j) {
+      boost::asio::post(
+          qs[j], [&promise, &g_cnt, counter = &queues_task_count[j]] mutable {
+            *counter += 1;
+            if (*counter == qs_task_count) {
+              if (g_cnt.fetch_add(1) == qs_count - 1) {
+                promise.set_value();
+              }
+            }
+          });
+    }
+  }
+  future.wait();
+  work_guard.reset();
 }

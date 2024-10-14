@@ -3,16 +3,18 @@
 #include "ntt/defs.h"
 #include "ntt/impl/list.h"
 #include "ntt/impl/task.h"
-#include "ntt/pool.h"
+#include "ntt/pool2.h"
+#include "task_list.h"
 
+#include <pthread.h>
 #include <stdatomic.h>
 #include <threads.h>
 
 struct ntt_queue {
   atomic_size_t external_refs;
-  ntt_list_t list;
-  ntt_pool_t *pool;
-  mtx_t mtx;
+  ntt_task_list_t tasks;
+  ntt_pool2_t *pool;
+  pthread_spinlock_t lock;
   ntt_task_node_t svc_task;
 };
 
@@ -27,60 +29,78 @@ static void svc(void *payload) {
   t_curr_queue = self;
   t_next_queue = NULL;
   do {
-    ntt_node_t *node = self->list.node.prev;
-    ntt_task_node_t *task_node = ntt_container_of(node, ntt_task_node_t, node);
-    task_node->task_cb(task_node->payload);
+    ntt_task_t *task = ntt_task_list_front(&self->tasks);
+    ntt_do_task_inl(task);
     if (t_next_queue != NULL) {
-      // ctx switch
-      mtx_lock(&self->mtx);
-      ntt_list_pop_front(&self->list, &last);
-      mtx_unlock(&self->mtx);
+      // queue ctx switch
+      pthread_spin_lock(&self->lock);
+      ntt_task_list_pop(&self->tasks, &last);
+      pthread_spin_unlock(&self->lock);
       if (!last) {
         // push current queue to pool
-        ntt_pool_push(self->pool, &self->svc_task.payload);
+        ntt_pool2_post_task(self->pool, &self->svc_task.payload);
       }
       self = t_next_queue;
       t_curr_queue = self;
       t_next_queue = NULL;
       last = 0;
     } else {
-      mtx_lock(&self->mtx);
-      ntt_list_pop_front(&self->list, &last);
-      mtx_unlock(&self->mtx);
+      pthread_spin_lock(&self->lock);
+      ntt_task_list_pop(&self->tasks, &last);
+      pthread_spin_unlock(&self->lock);
     }
+    ntt_free_task_inl(task);
   } while (!last);
 }
 
-ntt_queue_t *ntt_queue_create(ntt_pool_t *pool) {
+void free_svc() {}
+
+ntt_queue_t *ntt_queue_create(ntt_pool2_t *pool) {
   ntt_queue_t *self = malloc(sizeof(ntt_queue_t));
   self->external_refs = 1;
-  ntt_list_init(&self->list);
+  ntt_task_list_init(&self->tasks);
   self->pool = pool;
-  ntt_pool_acquire(self->pool);
-  mtx_init(&self->mtx, mtx_plain);
+  ntt_pool2_acquire(self->pool);
+  pthread_spin_init(&self->lock, PTHREAD_PROCESS_PRIVATE);
   self->svc_task.task_cb = svc;
+  self->svc_task.free_cb = free_svc;
   return self;
 }
 
+ntt_task_t *ntt_queue_alloc_task(ntt_queue_t *self, ntt_task_cb_t *task_cb) {
+  return ntt_pool2_alloc_task(self->pool, task_cb);
+}
+
 void ntt_queue_push(ntt_queue_t *self, ntt_task_t *task) {
-  ntt_task_node_t *task_node = ntt_container_of(task, ntt_task_node_t, payload);
   int first;
-  mtx_lock(&self->mtx);
-  ntt_list_push_back(&self->list, &task_node->node, &first);
-  mtx_unlock(&self->mtx);
+  pthread_spin_lock(&self->lock);
+  ntt_task_list_push(&self->tasks, task, &first);
+  pthread_spin_unlock(&self->lock);
   if (first) {
     if (t_curr_queue != NULL && self != t_curr_queue && t_next_queue == NULL) {
       t_next_queue = self;
     } else {
-      ntt_pool_push(self->pool, &self->svc_task.payload);
+      ntt_pool2_post_task(self->pool, &self->svc_task.payload);
     }
   }
 }
 
 void ntt_queue_acquire(ntt_queue_t *queue) {
-  // TODO: queue memory management
+  size_t prev = atomic_fetch_add(&queue->external_refs, 1);
+  assert(prev > 0 && "ntt queue already deleted");
 }
 
-void ntt_queue_release(ntt_queue_t *queue) {
-  // TODO: queue memory management
+void ntt_queue_destroy(ntt_queue_t *self) {
+  pthread_spin_destroy(&self->lock);
+  ntt_pool2_release(self->pool);
+}
+
+void ntt_queue_release(ntt_queue_t *self) {
+  size_t prev = atomic_fetch_sub(&self->external_refs, 1);
+  assert(prev > 0 && "ntt queue already deleted");
+
+  if (prev == 1) {
+    ntt_queue_destroy(self);
+    free(self);
+  }
 }

@@ -1,3 +1,5 @@
+#pragma once
+
 #include "ntt/defs.h"
 #include "ntt/export.h"
 #include "ntt/task.h"
