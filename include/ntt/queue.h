@@ -2,7 +2,7 @@
 
 #include "ntt/defs.h"
 #include "ntt/export.h"
-#include "ntt/pool2.h"
+#include "ntt/pool.h"
 
 EXTERN_START
 

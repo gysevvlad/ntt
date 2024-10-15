@@ -3,7 +3,7 @@
 #include "ntt/defs.h"
 #include "ntt/impl/list.h"
 #include "ntt/impl/task.h"
-#include "ntt/pool2.h"
+#include "ntt/pool.h"
 #include "task_list.h"
 
 #include <pthread.h>

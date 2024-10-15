@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ntt/ntt.h"
-#include "ntt/queue.h"
 
 #include <memory>
 #include <type_traits>

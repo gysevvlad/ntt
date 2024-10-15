@@ -26,10 +26,10 @@ generate_export_header(ntt EXPORT_FILE_NAME include/ntt/export.h)
 # ntt sources
 target_sources(ntt
   PRIVATE
-    src/pool2.c
-    src/task_cache.c
+    src/pool.c
     src/queue.c
     src/task.c
+    src/task_cache.c
     # src/task_queue.c
   PRIVATE
     FILE_SET ntt_impl_headers
@@ -43,7 +43,7 @@ target_sources(ntt
     FILES
       ${CMAKE_CURRENT_BINARY_DIR}/include/ntt/export.h
       include/ntt/defs.h
-      include/ntt/pool2.h
+      include/ntt/pool.h
       include/ntt/task.h
       include/ntt/task_queue.h
     BASE_DIRS

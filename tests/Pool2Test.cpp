@@ -1,6 +1,4 @@
-#include "ntt/pool2.h"
 #include "ntt/ntt.hpp"
-#include "ntt/queue.h"
 
 #include <boost/asio.hpp>
 #include <boost/asio/any_io_executor.hpp>

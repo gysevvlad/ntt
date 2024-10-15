@@ -1,4 +1,4 @@
-#include "ntt/pool2.h"
+#include "ntt/pool.h"
 #include "ntt/impl/list.h"
 #include "ntt/impl/ntt_task_cache.h"
 #include "ntt/impl/task.h"
