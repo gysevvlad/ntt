@@ -14,7 +14,7 @@
 TEST(Pool2, Run) {
   static constexpr std::size_t width = 4;
   static constexpr std::size_t cnt = 100'000'000;
-  auto *pool = ntt_pool2_create(width);
+  auto *pool = ntt_pool_create(width);
   std::atomic<int> g_cnt;
   std::promise<void> promise;
   auto future = promise.get_future();
@@ -26,7 +26,7 @@ TEST(Pool2, Run) {
     });
   }
   future.wait();
-  ntt_pool2_release(pool);
+  ntt_pool_release(pool);
   std::cout << g_cnt << std::endl;
 }
 
@@ -34,7 +34,7 @@ TEST(Pool2, Run2) {
   static constexpr std::size_t width = 4;
   static constexpr std::size_t mul = 80;
   static constexpr std::size_t cnt = mul * mul * mul * mul;
-  auto *pool = ntt_pool2_create(width);
+  auto *pool = ntt_pool_create(width);
   std::atomic<int> g_cnt;
   std::promise<void> promise;
   auto future = promise.get_future();
@@ -61,7 +61,7 @@ TEST(Pool2, Run2) {
   });
 
   future.wait();
-  ntt_pool2_release(pool);
+  ntt_pool_release(pool);
   std::cout << g_cnt << std::endl;
 }
 
@@ -149,7 +149,7 @@ TEST(Pool2, Run3Ntt) {
   static constexpr std::size_t width = 4;
   static constexpr std::size_t mul = 16;
   static constexpr std::size_t cnt = mul * mul * mul * mul;
-  auto *pool = ntt_pool2_create(width);
+  auto *pool = ntt_pool_create(width);
   std::atomic<int> g_cnt;
   std::promise<void> promise;
   auto future = promise.get_future();
@@ -180,7 +180,7 @@ TEST(Pool2, Run3Ntt) {
     }
   });
   future.wait();
-  ntt_pool2_release(pool);
+  ntt_pool_release(pool);
   std::cout << g_cnt << std::endl;
 }
 
@@ -278,7 +278,7 @@ TEST(Pool2, Queue1) {
   static constexpr std::size_t qs_count = 128;
   static constexpr std::size_t gs_task_count = 1024;
   static constexpr std::size_t task_count = qs_count * gs_task_count;
-  auto *pool = ntt_pool2_create(4);
+  auto *pool = ntt_pool_create(4);
   std::vector<ntt_queue_t *> qs;
   qs.reserve(qs_count);
   for (std::size_t i = 0; i < qs_count; ++i) {

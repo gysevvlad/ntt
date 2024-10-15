@@ -17,7 +17,7 @@
 #include <unistd.h>
 
 typedef struct ntt_thread_slot_t {
-  ntt_pool2_t *pool;
+  ntt_pool_t *pool;
   pthread_t thread_id;
   int action_cnt;
   ntt_task_list_t tasks;
@@ -27,7 +27,7 @@ typedef struct ntt_thread_slot_t {
 
 typedef struct ntt_thread_slot_t ntt_thread_t;
 
-struct ntt_pool2 {
+struct ntt_pool {
   atomic_size_t internal_refs;
   atomic_size_t external_refs;
 
@@ -46,7 +46,7 @@ struct ntt_pool2 {
 
 #define SIGNTTACTION SIGRTMIN + 16
 
-void ntt_pool2_destroy(ntt_pool2_t *self) {
+void ntt_pool_destroy(ntt_pool_t *self) {
   pthread_spin_destroy(&self->tasks_lock);
 
   int rc = epoll_ctl(self->epollfd, EPOLL_CTL_DEL, self->eventfd, NULL);
@@ -69,14 +69,14 @@ void ntt_pool2_destroy(ntt_pool2_t *self) {
   free(self);
 }
 
-void ntt_pool2_release_internal(ntt_pool2_t *self) {
+void ntt_pool_release_internal(ntt_pool_t *self) {
   assert(atomic_load_explicit(&self->external_refs, memory_order_relaxed) ==
              0 &&
          "ntt pool has unexpected external refs");
   size_t prev = atomic_fetch_sub(&self->internal_refs, 1);
   assert(prev > 0 && "ntt pool has unexpected internal refs");
   if (prev == 1) {
-    ntt_pool2_destroy(self);
+    ntt_pool_destroy(self);
   }
 }
 
@@ -131,7 +131,7 @@ void *ntt_thread_svc(void *arg) {
       pthread_spin_unlock(&thread->pool->tasks_lock);
     }
   }
-  ntt_pool2_release_internal(thread->pool);
+  ntt_pool_release_internal(thread->pool);
   return NULL;
 }
 
@@ -141,7 +141,7 @@ void handler(int signo, siginfo_t *info, void *context) {
   assert(signo == SIGNTTACTION);
 }
 
-void ntt_pool2_post_task(ntt_pool2_t *self, ntt_task_t *task) {
+void ntt_pool_post_task(ntt_pool_t *self, ntt_task_t *task) {
   int need_wakeup = 0;
   pthread_spin_lock(&self->tasks_lock);
   int first;
@@ -156,12 +156,12 @@ void ntt_pool2_post_task(ntt_pool2_t *self, ntt_task_t *task) {
   }
 }
 
-ntt_pool2_t *ntt_pool2_create(unsigned short width) {
+ntt_pool_t *ntt_pool_create(unsigned short width) {
   int rc;
   int i;
 
-  ntt_pool2_t *self =
-      malloc(sizeof(ntt_pool2_t) + sizeof(ntt_thread_slot_t) * width);
+  ntt_pool_t *self =
+      malloc(sizeof(ntt_pool_t) + sizeof(ntt_thread_slot_t) * width);
   assert(self != NULL);
 
   self->external_refs = 1;
@@ -239,31 +239,31 @@ void ntt_thread_push_task(ntt_thread_t *thread, ntt_task_t *task) {
   }
 }
 
-void ntt_pool2_send_task(ntt_pool2_t *pool, unsigned short idx,
+void ntt_pool_send_task(ntt_pool_t *pool, unsigned short idx,
                          ntt_task_t *task) {
   ntt_thread_push_task(&pool->threads[idx], task);
 }
 
-ntt_task_t *ntt_pool2_alloc_task(ntt_pool2_t *pool, ntt_task_cb_t *task_cb) {
+ntt_task_t *ntt_pool_alloc_task(ntt_pool_t *pool, ntt_task_cb_t *task_cb) {
   return ntt_task_cache_alloc_task(pool->task_cache, task_cb);
 }
 
-void ntt_pool2_stop(ntt_pool2_t *self) {
+void ntt_pool_stop(ntt_pool_t *self) {
   unsigned int i;
   for (i = 0; i < self->thread_cnt; ++i) {
-    ntt_pool2_post_task(self, &self->threads[i].stop_task.payload);
+    ntt_pool_post_task(self, &self->threads[i].stop_task.payload);
   }
 }
 
-void ntt_pool2_acquire(ntt_pool2_t *self) {
+void ntt_pool_acquire(ntt_pool_t *self) {
   size_t prev = atomic_fetch_add(&self->external_refs, 1);
   assert(prev > 0 && "ntt pool already deleted");
 }
 
-void ntt_pool2_release(ntt_pool2_t *self) {
+void ntt_pool_release(ntt_pool_t *self) {
   size_t prev = atomic_fetch_sub(&self->external_refs, 1);
   assert(prev > 0 && "ntt pool already deleted");
   if (prev == 1) {
-    ntt_pool2_stop(self);
+    ntt_pool_stop(self);
   }
 }

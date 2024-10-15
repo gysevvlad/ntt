@@ -9,14 +9,14 @@ namespace ntt {
 
 using task = ntt_task_t;
 
-using pool = ntt_pool2_t;
+using pool = ntt_pool_t;
 
 using queue = ntt_queue_t;
 
 template <class FunctorT> void post(pool *pool, FunctorT &&functor) {
   using F = std::remove_cvref_t<FunctorT>;
   static_assert(sizeof(F) <= NTT_TASK_PAYLOAD_SIZE);
-  auto task = ntt_pool2_alloc_task(
+  auto task = ntt_pool_alloc_task(
       pool, +[](void *payload) {
         auto *f = static_cast<F *>(
             std::assume_aligned<NTT_TASK_PAYLOAD_ALIGN>(payload));
@@ -24,7 +24,7 @@ template <class FunctorT> void post(pool *pool, FunctorT &&functor) {
         f->~F();
       });
   new (task) F{std::forward<FunctorT>(functor)};
-  ntt_pool2_post_task(pool, task);
+  ntt_pool_post_task(pool, task);
 }
 
 template <class FunctorT> void post(queue *queue, FunctorT &&functor) {

@@ -13,7 +13,7 @@
 struct ntt_queue {
   atomic_size_t external_refs;
   ntt_task_list_t tasks;
-  ntt_pool2_t *pool;
+  ntt_pool_t *pool;
   pthread_spinlock_t lock;
   ntt_task_node_t svc_task;
 };
@@ -38,7 +38,7 @@ static void svc(void *payload) {
       pthread_spin_unlock(&self->lock);
       if (!last) {
         // push current queue to pool
-        ntt_pool2_post_task(self->pool, &self->svc_task.payload);
+        ntt_pool_post_task(self->pool, &self->svc_task.payload);
       }
       self = t_next_queue;
       t_curr_queue = self;
@@ -55,12 +55,12 @@ static void svc(void *payload) {
 
 void free_svc() {}
 
-ntt_queue_t *ntt_queue_create(ntt_pool2_t *pool) {
+ntt_queue_t *ntt_queue_create(ntt_pool_t *pool) {
   ntt_queue_t *self = malloc(sizeof(ntt_queue_t));
   self->external_refs = 1;
   ntt_task_list_init(&self->tasks);
   self->pool = pool;
-  ntt_pool2_acquire(self->pool);
+  ntt_pool_acquire(self->pool);
   pthread_spin_init(&self->lock, PTHREAD_PROCESS_PRIVATE);
   self->svc_task.task_cb = svc;
   self->svc_task.free_cb = free_svc;
@@ -68,7 +68,7 @@ ntt_queue_t *ntt_queue_create(ntt_pool2_t *pool) {
 }
 
 ntt_task_t *ntt_queue_alloc_task(ntt_queue_t *self, ntt_task_cb_t *task_cb) {
-  return ntt_pool2_alloc_task(self->pool, task_cb);
+  return ntt_pool_alloc_task(self->pool, task_cb);
 }
 
 void ntt_queue_push(ntt_queue_t *self, ntt_task_t *task) {
@@ -80,7 +80,7 @@ void ntt_queue_push(ntt_queue_t *self, ntt_task_t *task) {
     if (t_curr_queue != NULL && self != t_curr_queue && t_next_queue == NULL) {
       t_next_queue = self;
     } else {
-      ntt_pool2_post_task(self->pool, &self->svc_task.payload);
+      ntt_pool_post_task(self->pool, &self->svc_task.payload);
     }
   }
 }
@@ -92,7 +92,7 @@ void ntt_queue_acquire(ntt_queue_t *queue) {
 
 void ntt_queue_destroy(ntt_queue_t *self) {
   pthread_spin_destroy(&self->lock);
-  ntt_pool2_release(self->pool);
+  ntt_pool_release(self->pool);
 }
 
 void ntt_queue_release(ntt_queue_t *self) {
