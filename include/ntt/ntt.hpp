@@ -1,8 +1,11 @@
 #pragma once
 
 #include "ntt/ntt.h"
+#include "ntt/sockaddr.h"
 
+#include <cassert>
 #include <memory>
+#include <ostream>
 #include <type_traits>
 
 namespace ntt {
@@ -60,4 +63,21 @@ inline void do_task(task *task) { ntt_do_task(task); }
 
 inline void free_task(task *task) { ntt_free_task(task); }
 
+inline std::string to_string(const ntt_sockaddr_t *self) {
+  assert(self != nullptr);
+  std::string buffer;
+  buffer.resize(ntt_sockaddr_formatted_size(self));
+  ntt_sockaddr_format_to(
+      self, ntt_char_span_from_len_and_ptr(buffer.length(), buffer.data()));
+  return buffer;
+}
+
 } // namespace ntt
+
+inline std::ostream &operator<<(std::ostream &ostream,
+                                const ntt_sockaddr_t *self) {
+  if (self) {
+    return ostream << ntt::to_string(self);
+  }
+  return ostream << "null";
+}

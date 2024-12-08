@@ -26,15 +26,31 @@ generate_export_header(ntt EXPORT_FILE_NAME include/ntt/export.h)
 # ntt sources
 target_sources(ntt
   PRIVATE
+    src/accept_source.c
+    src/cstr.c
+    src/impl/sockaddr_in.c
+    src/impl/sockaddr_in6.c
+    src/impl/sockaddr_un.c
+    src/in6_addr.c
+    src/in_addr.c
     src/pool.c
     src/queue.c
+    src/sockaddr.c
     src/task.c
     src/task_cache.c
-    # src/task_queue.c
+    src/thread.c
+    src/util.c
+    src/view.c
   PRIVATE
     FILE_SET ntt_impl_headers
     TYPE HEADERS
     FILES
+      include/ntt/impl/in6_addr.h
+      include/ntt/impl/in_addr.h
+      include/ntt/impl/sockaddr_in.h
+      include/ntt/impl/sockaddr_in6.h
+      include/ntt/impl/sockaddr_un.h
+      include/ntt/impl/table.h
     BASE_DIRS
       include
   PUBLIC
@@ -42,10 +58,15 @@ target_sources(ntt
     TYPE HEADERS
     FILES
       ${CMAKE_CURRENT_BINARY_DIR}/include/ntt/export.h
+      include/ntt/accept_source.h
+      include/ntt/cstr.h
       include/ntt/defs.h
       include/ntt/pool.h
+      include/ntt/sockaddr.h
       include/ntt/task.h
       include/ntt/task_queue.h
+      include/ntt/util.h
+      include/ntt/view.h
     BASE_DIRS
       ${CMAKE_CURRENT_BINARY_DIR}/include
       include)
@@ -85,7 +106,11 @@ target_link_libraries(ntt_shared PUBLIC ntt)
 #[[ unit tests ]]#
 
 add_executable(ntt_unit_tests
-  tests/Pool2Test.cpp)
+  tests/AcceptSourceTest.cpp
+  tests/Pool2Test.cpp
+  tests/SockaddrTest.cpp
+  tests/UtilTest.cpp
+  tests/ThreadTest.cpp)
   # tests/pool.cpp
   # tests/task.cpp
   # tests/task_queue.cpp)
@@ -95,7 +120,7 @@ set_target_properties(
   PROPERTIES
     CXX_STANDARD 23
     CXX_STANDARD_REQUIRED on
-    CXX_EXTENSIONS off)
+    CXX_EXTENSIONS on)
 
 # TODO: cmake dependency management
 find_package(GTest)

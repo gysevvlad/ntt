@@ -6,3 +6,4 @@
 static inline int ntt_is_aligned(void *ptr, size_t align) {
   return !((uintptr_t)(ptr) % align);
 }
+

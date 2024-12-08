@@ -1,5 +1,3 @@
-#pragma once
-
 #include "ntt/defs.h"
 #include "ntt/impl/ntt_task_cache.h"
 #include "ntt/impl/task.h"
