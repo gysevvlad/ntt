@@ -109,8 +109,9 @@ add_executable(ntt_unit_tests
   tests/AcceptSourceTest.cpp
   tests/Pool2Test.cpp
   tests/SockaddrTest.cpp
-  tests/UtilTest.cpp
-  tests/ThreadTest.cpp)
+  tests/TaskTest.cpp
+  tests/ThreadTest.cpp
+  tests/UtilTest.cpp)
   # tests/pool.cpp
   # tests/task.cpp
   # tests/task_queue.cpp)

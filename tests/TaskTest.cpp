@@ -4,7 +4,24 @@
 
 #include <future>
 
-TEST(Task, Common) {
+class TaskTest : public testing::Test {
+};
+
+TEST_F(TaskTest, RawTask)
+{
+    int v = 0;
+    auto task = ntt_make_task(
+        +[](void* payload) {
+            **static_cast<int**>(payload) = 1234;
+        },
+        NULL);
+    *static_cast<int**>(task) = &v;
+    ntt_do_task(task);
+    ntt_free_task(task);
+    ASSERT_EQ(v, 1234);
+}
+
+TEST_F(TaskTest, Common) {
   std::promise<int> promise;
   auto future = promise.get_future();
   auto *task = ntt::make_task(
@@ -14,7 +31,7 @@ TEST(Task, Common) {
   ASSERT_EQ(future.get(), 9);
 }
 
-TEST(NttTaskTest, DoTask) {
+TEST_F(TaskTest, DoTask) {
   int v = 0;
   auto task = ntt::make_task([&] { v = 1; });
   ntt::do_task(task);
@@ -27,7 +44,7 @@ template <class T> bool is_aligned(const void *ptr) noexcept {
   return !(iptr % alignof(T));
 }
 
-TEST(Task, CheckDefaultMallocAlignment) {
+TEST_F(TaskTest, CheckDefaultMallocAlignment) {
   struct alignas(16) A {
     int a;
   };
@@ -38,7 +55,7 @@ TEST(Task, CheckDefaultMallocAlignment) {
   }
 }
 
-TEST(Task, Alignment) {
+TEST_F(TaskTest, Alignment) {
   struct alignas(8) A {
     std::uint64_t a;
   } a;
