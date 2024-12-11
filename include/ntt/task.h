@@ -25,12 +25,12 @@ EXTERN_START
 /**
  * @brief Task callback.
  */
-typedef void(ntt_task_cb_t)(void *payload);
+typedef void(ntt_task_cb_t)(void* payload);
 
 /**
  * @brief Free callback.
  */
-typedef void(ntt_free_cb_t)(void *ptr);
+typedef void(ntt_free_cb_t)(void* ptr);
 
 /**
  * @brief Opaque task structure.
@@ -43,17 +43,17 @@ typedef void ntt_task_t;
  * TODO: dynamic task payload size
  * TODO: over-aligned task payload data
  */
-NTT_EXPORT ntt_task_t *ntt_make_task(ntt_task_cb_t *task_cb,
-                                     ntt_free_cb_t *free_cb);
+NTT_EXPORT ntt_task_t* ntt_make_task(ntt_task_cb_t* task_cb,
+    ntt_free_cb_t* free_cb);
 
 /**
  * @brief Do task.
  */
-NTT_EXPORT void ntt_do_task(ntt_task_t *task);
+NTT_EXPORT void ntt_do_task(ntt_task_t* task);
 
 /**
  * @brief Free task.
  */
-NTT_EXPORT void ntt_free_task(void *task);
+NTT_EXPORT void ntt_free_task(void* task);
 
 EXTERN_STOP

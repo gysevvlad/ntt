@@ -8,11 +8,11 @@
 
 EXTERN_START
 
-int ntt_sockaddr_in6_from_view(struct sockaddr_in6 *addr, ntt_view_t view);
+int ntt_sockaddr_in6_from_view(struct sockaddr_in6* addr, ntt_view_t view);
 
-size_t ntt_sockaddr_in6_formatted_size(struct sockaddr_in6 *self);
+size_t ntt_sockaddr_in6_formatted_size(struct sockaddr_in6* self);
 
-ntt_char_span_t ntt_sockaddr_in6_format_to(struct sockaddr_in6 *self,
-                                           ntt_char_span_t buffer);
+ntt_char_span_t ntt_sockaddr_in6_format_to(struct sockaddr_in6* self,
+    ntt_char_span_t buffer);
 
 EXTERN_STOP
