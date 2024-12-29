@@ -1,9 +1,12 @@
 #pragma once
 
 #include "ntt/ntt.h"
+#include "ntt/pool.h"
 #include "ntt/sockaddr.h"
 
 #include <cassert>
+#include <condition_variable>
+#include <future>
 #include <memory>
 #include <ostream>
 #include <type_traits>
@@ -12,12 +15,10 @@ namespace ntt {
 
 using task = ntt_task_t;
 
-using pool = ntt_pool_t;
-
 using queue = ntt_queue_t;
 
 template <class FunctorT>
-void post(pool* pool, FunctorT&& functor)
+void post(ntt_pool_t* pool, FunctorT&& functor)
 {
     using F = std::remove_cvref_t<FunctorT>;
     static_assert(sizeof(F) <= NTT_TASK_PAYLOAD_SIZE);
@@ -78,6 +79,31 @@ inline std::string to_string(const ntt_sockaddr_t* self)
         self, ntt_char_span_from_len_and_ptr(buffer.length(), buffer.data()));
     return buffer;
 }
+
+struct context {
+    explicit context(unsigned width)
+        : m_pool {
+            ntt_pool_with_stopped_cb(
+                width,
+                +[](void* ctx) { static_cast<std::promise<void>*>(ctx)->set_value(); },
+                &m_p)
+        }
+    {
+    }
+
+    ~context()
+    {
+        ntt_pool_release(m_pool);
+        m_f.wait();
+    }
+
+    ntt_pool_t* as_pool() { return m_pool; }
+
+private:
+    std::promise<void> m_p;
+    std::future<void> m_f = m_p.get_future();
+    ntt_pool_t* m_pool;
+};
 
 } // namespace ntt
 

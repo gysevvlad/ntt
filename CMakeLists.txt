@@ -27,7 +27,9 @@ generate_export_header(ntt EXPORT_FILE_NAME include/ntt/export.h)
 target_sources(ntt
   PRIVATE
     src/accept_source.c
+    src/connect_request.c
     src/cstr.c
+    src/event_source.c
     src/impl/sockaddr_in.c
     src/impl/sockaddr_in6.c
     src/impl/sockaddr_un.c
@@ -38,6 +40,7 @@ target_sources(ntt
     src/sockaddr.c
     src/task.c
     src/task_cache.c
+    src/tcp_source.c
     src/thread.c
     src/util.c
     src/view.c
@@ -45,12 +48,15 @@ target_sources(ntt
     FILE_SET ntt_impl_headers
     TYPE HEADERS
     FILES
+      include/ntt/impl/connect_request.h
+      include/ntt/impl/event_source.h
       include/ntt/impl/in6_addr.h
       include/ntt/impl/in_addr.h
       include/ntt/impl/sockaddr_in.h
       include/ntt/impl/sockaddr_in6.h
       include/ntt/impl/sockaddr_un.h
       include/ntt/impl/table.h
+      include/ntt/impl/tcp_source.h
     BASE_DIRS
       include
   PUBLIC
@@ -59,12 +65,15 @@ target_sources(ntt
     FILES
       ${CMAKE_CURRENT_BINARY_DIR}/include/ntt/export.h
       include/ntt/accept_source.h
+      include/ntt/connect_request.h
       include/ntt/cstr.h
       include/ntt/defs.h
+      include/ntt/event_source.h
       include/ntt/pool.h
       include/ntt/sockaddr.h
       include/ntt/task.h
       include/ntt/task_queue.h
+      include/ntt/tcp_source.h
       include/ntt/util.h
       include/ntt/view.h
     BASE_DIRS
@@ -108,13 +117,12 @@ target_link_libraries(ntt_shared PUBLIC ntt)
 add_executable(ntt_unit_tests
   tests/AcceptSourceTest.cpp
   tests/Pool2Test.cpp
+  tests/PoolTest.cpp
   tests/SockaddrTest.cpp
   tests/TaskTest.cpp
   tests/ThreadTest.cpp
-  tests/UtilTest.cpp)
-  # tests/pool.cpp
-  # tests/task.cpp
-  # tests/task_queue.cpp)
+  tests/UtilTest.cpp
+)
 
 set_target_properties(
   ntt_unit_tests

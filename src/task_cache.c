@@ -59,4 +59,4 @@ ntt_task_t* ntt_task_cache_alloc_task(ntt_task_cache_t* self,
     return task;
 }
 
-void ntt_task_cache_destroy(ntt_task_cache_t* self) { }
+void ntt_task_cache_destroy(ntt_task_cache_t* self) { free(self); }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ntt/export.h"
+
 #ifdef __cplusplus
 #define EXTERN_START extern "C" {
 #define EXTERN_STOP }

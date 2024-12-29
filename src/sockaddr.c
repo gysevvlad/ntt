@@ -74,9 +74,10 @@ ntt_char_span_t ntt_sockaddr_format_to(const ntt_sockaddr_t* self,
     return buffer;
 }
 
-void ntt_sockaddr_acquire(ntt_sockaddr_t* self)
+ntt_sockaddr_t* ntt_sockaddr_acquire(ntt_sockaddr_t* self)
 {
     atomic_fetch_add(&self->refs, 1);
+    return self;
 }
 
 void ntt_sockaddr_release(ntt_sockaddr_t* self)

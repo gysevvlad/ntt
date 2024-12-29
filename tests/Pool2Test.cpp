@@ -344,3 +344,19 @@ TEST(Pool2, QueueDispatch1) {
   future.wait();
   work_guard.reset();
 }
+
+TEST(Pool, PostBarrier)
+{
+    static constexpr std::size_t g_cnt = 1024;
+    auto pool = ntt_pool_create(1);
+    size_t cnt = 0;
+    for (std::size_t i = 0; i < g_cnt; ++i) {
+        ntt_pool_post_barrier_task(pool, ntt::make_task([&cnt] { cnt += 1; }));
+    }
+    std::promise<void> p;
+    auto f = p.get_future();
+    ntt_pool_post_barrier_task(pool, ntt::make_task([p = std::move(p)] mutable { p.set_value(); }));
+    f.wait();
+    ASSERT_EQ(cnt, g_cnt);
+    ntt_pool_release(pool);
+}

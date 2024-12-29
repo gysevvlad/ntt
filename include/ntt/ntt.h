@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ntt/accept_source.h"
+#include "ntt/connect_request.h"
 #include "ntt/pool.h"
 #include "ntt/queue.h"
 #include "ntt/sockaddr.h"
