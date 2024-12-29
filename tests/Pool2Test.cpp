@@ -1,8 +1,6 @@
 #include "ntt/ntt.hpp"
 
 #include <boost/asio.hpp>
-#include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/executor_work_guard.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/address_v6.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -318,7 +316,7 @@ TEST(Pool2, QueueDispatch1) {
     threads.emplace_back([&pool] { pool.run(); });
     threads.back().detach();
   }
-  std::vector<boost::asio::strand<boost::asio::any_io_executor>> qs;
+  std::vector<boost::asio::strand<boost::asio::io_context::executor_type>> qs;
   qs.reserve(qs_count);
   for (std::size_t i = 0; i < qs_count; ++i) {
     qs.emplace_back(boost::asio::make_strand(pool));

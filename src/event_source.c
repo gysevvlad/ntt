@@ -196,7 +196,7 @@ void ntt_event_source_wakeup(void* ctx, uint32_t events)
 
 ntt_event_source_t* ntt_event_source_create(
     ntt_pool_t* pool,
-    ntt_event_handler_tbl_t* handler_tbl,
+    const ntt_event_handler_tbl_t* handler_tbl,
     void* handler_ctx,
     int fd,
     int events)
@@ -209,15 +209,7 @@ ntt_event_source_t* ntt_event_source_create(
         return self;
     }
 
-    self->ec = 0;
-    self->fd = fd;
-    self->pool = ntt_pool_acquire(pool);
-    self->state = 0;
-    self->event_handler_tbl = handler_tbl;
-    self->event_handler_ctx = handler_ctx;
-    self->event.cb = ntt_event_source_wakeup;
-    self->event.ctx = self;
-    self->events_mask = events;
+    ntt_event_source_init(self, pool, handler_tbl, handler_ctx, fd, events);
 
     return self;
 }
@@ -254,6 +246,33 @@ void ntt_event_source_cancel(
 void ntt_event_source_destroy(
     ntt_event_source_t* self)
 {
-    ntt_pool_release(self->pool);
+    ntt_event_source_deinit(self);
     free(self);
+}
+
+void ntt_event_source_init(
+    ntt_event_source_t* self,
+    ntt_pool_t* pool,
+    const ntt_event_handler_tbl_t* handler_tbl,
+    void* handler_ctx,
+    int fd,
+    int events)
+{
+    assert((events & ~0b11) == 0);
+
+    self->ec = 0;
+    self->fd = fd;
+    self->pool = ntt_pool_acquire(pool);
+    self->state = 0;
+    self->event_handler_tbl = handler_tbl;
+    self->event_handler_ctx = handler_ctx;
+    self->event.cb = ntt_event_source_wakeup;
+    self->event.ctx = self;
+    self->events_mask = events;
+}
+
+void ntt_event_source_deinit(
+    ntt_event_source_t* self)
+{
+    ntt_pool_release(self->pool);
 }

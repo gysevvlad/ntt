@@ -2,8 +2,11 @@
 #include "ntt/event_source.h"
 #include "ntt/impl/event_source.h"
 #include "ntt/ntt.hpp"
+#include "ntt/reader.h"
 #include "ntt/task_queue.h"
 
+#include <asm-generic/errno-base.h>
+#include <asm-generic/errno.h>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
@@ -13,6 +16,7 @@
 #include <memory>
 #include <mutex>
 #include <span>
+#include <system_error>
 #include <thread>
 
 #include <fcntl.h>
@@ -37,50 +41,18 @@ TEST_F(PoolTest, CreateDestroy)
     f.wait();
 }
 
-struct PipeReader {
-    std::promise<void> p;
-    std::future<void> f = p.get_future();
-    std::mutex mutex;
-};
+std::mutex g_cout_mutex;
 
-ntt_event_handler_tbl_t g_pipe_reader_event_handler {
-    .name = "pipe_reader",
-    .on_ready_cb = +[](ntt_event_source_t* src, void* ctx, int events) { 
-
-        std::unique_lock lock{static_cast<PipeReader*>(ctx)->mutex, std::try_to_lock};
-        assert(lock.owns_lock());
-
-        assert(events == NTT_READ_EVENT);
-
-        std::array<std::uint8_t, 32> data;
-        int rc = 0;
-        int transferred = 0;
-        do {
-            transferred += rc;
-            rc = read(src->fd, data.data(), data.size());
-        } while (rc > 0 || (rc == -1 && errno == EINTR));
-
-        std::cout << "transferred: " << transferred << '\n';
-
-        if (rc == -1) {
-            int ec = errno;
-            if (ec == EWOULDBLOCK || ec == EAGAIN) {
-                return 0;
-            }
-            return ec;
-        }
-
-        if (rc == 0) {
-            std::cout << "done: " << transferred << '\n';
-            ntt_event_source_cancel(src);
-            return 0;
-        }
-
+static constexpr ntt_reader_listener_tbl_t g_reader_listener_tbl {
+    .on_data = [](void* ctx, ntt_reader_t* reader, uint8_t* data, size_t size) {
+        std::unique_lock lock{g_cout_mutex};
+        std::cout << "got " << size << " bytes\n";
         return 0; },
-    .on_del_cb = +[](ntt_event_source_t* src, void* ctx) { 
-        static_cast<PipeReader*>(ctx)->p.set_value();
-        std::cout << "stopped with " << src->ec << '\n';
-        ntt_event_source_destroy(src); }
+    .on_stop = [](void* ctx, ntt_reader_t* reader, int ec) {
+        ntt_reader_destroy(reader);
+        std::unique_lock lock{g_cout_mutex};
+        std::cout << "reader stopped with ec: " << ec << std::make_error_code(errc { ec }).message() << "\n";
+        static_cast<std::promise<void>*>(ctx)->set_value(); },
 };
 
 struct DummyPipeWriter {
@@ -99,37 +71,102 @@ struct DummyPipeWriter {
         int transferred = 0;
         do {
             transferred += rc;
-            rc = ::write(fd, data.data(), data.size());
+            rc = ::write(fd, data.data() + transferred, data.size() - transferred);
         } while (rc > 0 || (rc == -1 && errno == EINTR));
 
-        if (rc == -1) {
-            int ec = errno;
-            if (ec == EWOULDBLOCK || ec == EAGAIN) {
-                buffer.resize(data.size());
-                std::memcpy(buffer.data(), data.data() - transferred, data.size() - transferred);
-                wait_ready = true;
-                return;
-            }
-
-            std::cerr << std::make_error_code(errc { errno }) << '\n';
+        if (rc == 0) {
             return;
         }
+
+        assert(rc == -1);
+
+        int ec = errno;
+        if (ec == EWOULDBLOCK || ec == EAGAIN) {
+            buffer.resize(data.size());
+            std::memcpy(buffer.data(), data.data() - transferred, data.size() - transferred);
+            wait_ready = true;
+            return;
+        }
+
+        auto error = std::make_error_code(errc { errno });
+
+        std::cerr << "[debug]" << error << ' ' << error.message() << '\n';
+        return;
     }
 
+    int wakeup(ntt_event_source_t* src, int events)
+    {
+        std::cout << "ntt_pipe_writer wakeup" << std::endl;
+
+        assert(events == NTT_WRITE_EVENT);
+
+        std::lock_guard l { m };
+
+        if (buffer.empty()) {
+            return 0;
+        }
+
+        int rc = 0;
+        int transferred = 0;
+        do {
+            transferred += rc;
+            rc = ::write(fd, buffer.data() + transferred, buffer.size() - transferred);
+        } while (rc > 0 || (rc == -1 && errno == EINTR));
+
+        assert(rc == -1);
+
+        int ec = errno;
+
+        if (ec == EWOULDBLOCK || ec == EAGAIN) {
+            ::memmove(buffer.data(), buffer.data() + transferred, buffer.size() - transferred);
+            buffer.resize(buffer.size() - transferred);
+            if (buffer.empty()) {
+                wait_ready = false;
+            }
+            return 0;
+        }
+
+        return ec;
+    }
+
+    static int wakeup_svc(ntt_event_source_t* src, void* ctx, int events)
+    {
+        return static_cast<DummyPipeWriter*>(ctx)->wakeup(src, events);
+    }
+
+    void stop()
+    {
+        ntt_event_source_cancel(event);
+    }
+
+    void on_del(ntt_event_source_t* src)
+    {
+        close(fd);
+        ntt_event_source_destroy(src);
+    }
+
+    static void on_del_svc(ntt_event_source_t* src, void* ctx)
+    {
+        return static_cast<DummyPipeWriter*>(ctx)->on_del(src);
+    }
+
+    ntt_event_source_t* event;
     std::mutex m;
-    bool wait_ready;
+    bool wait_ready { false };
     int fd;
     std::vector<std::uint8_t> buffer;
 };
 
 ntt_event_handler_tbl_t g_pipe_writer_event_handler_tbl = {
-
+    .name = "pipe_writer",
+    .on_ready_cb = DummyPipeWriter::wakeup_svc,
+    .on_del_cb = DummyPipeWriter::on_del_svc,
 };
 
 TEST_F(PoolTest, Pipe)
 {
     static constexpr std::size_t g_cnt = 1'000;
-    static constexpr std::size_t g_pool_width = 8;
+    static constexpr std::size_t g_pool_width = 4;
     std::promise<void> p;
     auto f = p.get_future();
     ntt_pool_t* pool = ntt_pool_with_stopped_cb(
@@ -142,20 +179,33 @@ TEST_F(PoolTest, Pipe)
     int fifo[2];
     ASSERT_EQ(pipe2(fifo, O_CLOEXEC | O_NONBLOCK), 0);
 
-    PipeReader reader;
+    std::promise<void> reader_stop_promise;
+    auto reader_stop_future = reader_stop_promise.get_future();
 
-    auto source = ntt_event_source_create(pool, &g_pipe_reader_event_handler, &reader, fifo[0], NTT_READ_EVENT);
-    ntt_event_source_start(source);
+    auto* reader = ntt_reader_create(
+        pool,
+        fifo[0],
+        &g_reader_listener_tbl,
+        &reader_stop_promise);
+
+    ntt_reader_start(reader);
+
+    DummyPipeWriter writer;
+    writer.fd = fifo[1];
+
+    auto write_source = ntt_event_source_create(pool, &g_pipe_writer_event_handler_tbl, &writer, fifo[1], NTT_WRITE_EVENT);
+    writer.event = write_source;
+    ntt_event_source_start(write_source);
 
     for (std::size_t i = 0; i < g_cnt; ++i) {
-        std::array<char, 16> data {};
-        write(fifo[1], data.data(), data.size());
+        std::array<std::uint8_t, 16> data {};
+        writer.write(data);
         std::this_thread::sleep_for(std::chrono::microseconds { 1 });
     }
 
-    close(fifo[1]);
+    writer.stop();
 
-    reader.f.wait();
+    reader_stop_future.wait();
 
     ntt_pool_release(pool);
     f.wait();

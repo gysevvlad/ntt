@@ -26,7 +26,7 @@ typedef struct ntt_event_handler_tbl {
 
 NTT_EXPORT ntt_event_source_t* ntt_event_source_create(
     ntt_pool_t* pool,
-    ntt_event_handler_tbl_t* handler_tbl,
+    const ntt_event_handler_tbl_t* handler_tbl,
     void* handler_ctx,
     int fd,
     int events);

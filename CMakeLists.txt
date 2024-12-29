@@ -17,7 +17,7 @@ set_target_properties(ntt
     C_EXTENSIONS on
     C_VISIBILITY_PRESET hidden
     POSITION_INDEPENDENT_CODE true
-    INTERPROCEDURAL_OPTIMIZATION true)
+    INTERPROCEDURAL_OPTIMIZATION false)
 
 # generate export header
 include(GenerateExportHeader)
@@ -37,6 +37,7 @@ target_sources(ntt
     src/in_addr.c
     src/pool.c
     src/queue.c
+    src/reader.c
     src/sockaddr.c
     src/task.c
     src/task_cache.c
@@ -133,7 +134,7 @@ set_target_properties(
 
 # TODO: cmake dependency management
 find_package(GTest)
-find_package(Boost)
+find_package(Boost REQUIRED)
 pkg_search_module(jemalloc REQUIRED IMPORTED_TARGET jemalloc)
 target_link_libraries(ntt_unit_tests PkgConfig::jemalloc ntt_shared Boost::headers GTest::gtest_main GTest::gtest)
 target_link_libraries(ntt_unit_tests ntt_static Boost::headers GTest::gtest_main GTest::gtest)

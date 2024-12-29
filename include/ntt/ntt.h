@@ -4,6 +4,7 @@
 #include "ntt/connect_request.h"
 #include "ntt/pool.h"
 #include "ntt/queue.h"
+#include "ntt/reader.h"
 #include "ntt/sockaddr.h"
 #include "ntt/task.h"
 #include "ntt/task_queue.h"

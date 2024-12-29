@@ -8,7 +8,7 @@ EXTERN_START
 
 struct ntt_event_source {
     int fd;
-    ntt_event_handler_tbl_t* event_handler_tbl;
+    const ntt_event_handler_tbl_t* event_handler_tbl;
     void* event_handler_ctx;
     int ec;
     ntt_pool_t* pool;
@@ -30,5 +30,16 @@ enum NTT_EVENT_SOURCE_STATE_MASKS {
 };
 
 void ntt_event_source_wakeup(void* self, uint32_t events);
+
+void ntt_event_source_init(
+    ntt_event_source_t *self,
+    ntt_pool_t* pool,
+    const ntt_event_handler_tbl_t* handler_tbl,
+    void* handler_ctx,
+    int fd,
+    int events);
+
+void ntt_event_source_deinit(
+    ntt_event_source_t *self);
 
 EXTERN_STOP
