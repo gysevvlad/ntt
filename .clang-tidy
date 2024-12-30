@@ -5,4 +5,6 @@ Checks: '
     -altera-struct-pack-align,
     -llvmlibc-callee-namespace,
     -llvmlibc-implementation-in-namespace,
+    -altera-unroll-loops,
+    -readability-identifier-length,
 '

@@ -193,7 +193,7 @@ TEST_F(PoolTest, Pipe)
     DummyPipeWriter writer;
     writer.fd = fifo[1];
 
-    auto write_source = ntt_event_source_create(pool, &g_pipe_writer_event_handler_tbl, &writer, fifo[1], NTT_WRITE_EVENT);
+    auto *write_source = ntt_event_source_create(pool, &g_pipe_writer_event_handler_tbl, &writer, fifo[1], NTT_WRITE_EVENT);
     writer.event = write_source;
     ntt_event_source_start(write_source);
 

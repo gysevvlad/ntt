@@ -12,3 +12,6 @@
 
 #define ntt_container_of(ptr, type, member) \
     ((type*)((char*)(ptr)-offsetof(type, member)))
+
+#define ntt_likely(x) __builtin_expect(!!(x), 1)
+#define ntt_unlikely(x) __builtin_expect(!!(x), 0)

@@ -38,6 +38,7 @@ target_sources(ntt
     src/pool.c
     src/queue.c
     src/reader.c
+    src/session.c
     src/sockaddr.c
     src/task.c
     src/task_cache.c
@@ -53,6 +54,7 @@ target_sources(ntt
       include/ntt/impl/event_source.h
       include/ntt/impl/in6_addr.h
       include/ntt/impl/in_addr.h
+      include/ntt/impl/session.h
       include/ntt/impl/sockaddr_in.h
       include/ntt/impl/sockaddr_in6.h
       include/ntt/impl/sockaddr_un.h
@@ -71,6 +73,7 @@ target_sources(ntt
       include/ntt/defs.h
       include/ntt/event_source.h
       include/ntt/pool.h
+      include/ntt/session.h
       include/ntt/sockaddr.h
       include/ntt/task.h
       include/ntt/task_queue.h
