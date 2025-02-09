@@ -91,9 +91,11 @@ void ntt_thread_setup_signal_action()
     assert(rc != -1);
 }
 
-void ntt_thread_init(ntt_thread_t* self,
+void ntt_thread_init(
+    ntt_thread_t* self,
     void (*complete_cb)(ntt_thread_t* thread, void* context),
-    void* context, int epoll_fd)
+    void* context,
+    int epoll_fd)
 {
     ntt_thread_setup_signal_action();
 
@@ -107,8 +109,12 @@ void ntt_thread_init(ntt_thread_t* self,
     pthread_spin_init(&self->tasks_lock, PTHREAD_PROCESS_PRIVATE);
     self->got_up = 0;
     ntt_task_list_init(&self->tasks_lists);
-    ntt_task_t* task = ntt_task_init(&self->tasks_sentinel, ntt_thread_stop_task_svc,
+
+    ntt_task_t* task = ntt_task_init(
+        &self->tasks_sentinel,
+        ntt_thread_stop_task_svc,
         ntt_thread_stop_task_free);
+
     *(ntt_thread_t**)task = self;
 
     // block SIGRTNTTUP

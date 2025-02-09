@@ -28,6 +28,7 @@ target_sources(ntt
   PRIVATE
     src/accept_source.c
     src/connect_request.c
+    src/context.c
     src/cstr.c
     src/event_source.c
     src/impl/sockaddr_in.c
@@ -38,7 +39,9 @@ target_sources(ntt
     src/pool.c
     src/queue.c
     src/reader.c
+    src/selector.c
     src/session.c
+    src/error.c
     src/sockaddr.c
     src/task.c
     src/task_cache.c
@@ -51,9 +54,11 @@ target_sources(ntt
     TYPE HEADERS
     FILES
       include/ntt/impl/connect_request.h
+      include/ntt/impl/context.h
       include/ntt/impl/event_source.h
       include/ntt/impl/in6_addr.h
       include/ntt/impl/in_addr.h
+      include/ntt/impl/selector.h
       include/ntt/impl/session.h
       include/ntt/impl/sockaddr_in.h
       include/ntt/impl/sockaddr_in6.h
@@ -69,6 +74,7 @@ target_sources(ntt
       ${CMAKE_CURRENT_BINARY_DIR}/include/ntt/export.h
       include/ntt/accept_source.h
       include/ntt/connect_request.h
+      include/ntt/context.h
       include/ntt/cstr.h
       include/ntt/defs.h
       include/ntt/event_source.h
@@ -122,6 +128,7 @@ add_executable(ntt_unit_tests
   tests/AcceptSourceTest.cpp
   tests/Pool2Test.cpp
   tests/PoolTest.cpp
+  tests/SelectorTest.cpp
   tests/SockaddrTest.cpp
   tests/TaskTest.cpp
   tests/ThreadTest.cpp
@@ -167,3 +174,5 @@ add_test(NAME unit_tests COMMAND ntt_unit_tests)
 #   DESTINATION lib/ntt/cmake)
 
 # add_subdirectory(learn)
+
+add_subdirectory(lessons)

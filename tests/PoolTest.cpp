@@ -13,8 +13,10 @@
 #include <cstring>
 #include <future>
 #include <gtest/gtest.h>
+#include <limits>
 #include <memory>
 #include <mutex>
+#include <ratio>
 #include <span>
 #include <system_error>
 #include <thread>
@@ -43,8 +45,12 @@ TEST_F(PoolTest, CreateDestroy)
 
 std::mutex g_cout_mutex;
 
+static std::size_t transferred_bytes_rx = 0;
+
 static constexpr ntt_reader_listener_tbl_t g_reader_listener_tbl {
     .on_data = [](void* ctx, ntt_reader_t* reader, uint8_t* data, size_t size) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        transferred_bytes_rx += size;
         std::unique_lock lock{g_cout_mutex};
         std::cout << "got " << size << " bytes\n";
         return 0; },
@@ -59,6 +65,10 @@ struct DummyPipeWriter {
     void write(std::span<const std::uint8_t> data)
     {
         std::lock_guard lock { m };
+
+        if (is_closing()) {
+            return;
+        }
 
         if (wait_ready) {
             auto old_len = buffer.size();
@@ -90,13 +100,16 @@ struct DummyPipeWriter {
 
         auto error = std::make_error_code(errc { errno });
 
+        std::unique_lock l { g_cout_mutex };
         std::cerr << "[debug]" << error << ' ' << error.message() << '\n';
-        return;
     }
 
     int wakeup(ntt_event_source_t* src, int events)
     {
-        std::cout << "ntt_pipe_writer wakeup" << std::endl;
+        {
+            std::unique_lock l { g_cout_mutex };
+            std::cout << "ntt_pipe_writer wakeup" << '\n';
+        }
 
         assert(events == NTT_WRITE_EVENT);
 
@@ -110,6 +123,15 @@ struct DummyPipeWriter {
         int transferred = 0;
         do {
             transferred += rc;
+            if (remain_to_close != std::numeric_limits<std::size_t>::max()) {
+                remain_to_close -= rc;
+            }
+            if (buffer.size() - transferred == 0) {
+                if (remain_to_close == 0) {
+                    ntt_event_source_cancel(event);
+                }
+                return 0;
+            }
             rc = ::write(fd, buffer.data() + transferred, buffer.size() - transferred);
         } while (rc > 0 || (rc == -1 && errno == EINTR));
 
@@ -122,6 +144,9 @@ struct DummyPipeWriter {
             buffer.resize(buffer.size() - transferred);
             if (buffer.empty()) {
                 wait_ready = false;
+            }
+            if (remain_to_close == 0) {
+                ntt_event_source_cancel(event);
             }
             return 0;
         }
@@ -136,13 +161,19 @@ struct DummyPipeWriter {
 
     void stop()
     {
-        ntt_event_source_cancel(event);
+        std::lock_guard l { m };
+        remain_to_close = buffer.size();
+        if (remain_to_close == 0) {
+            ntt_event_source_cancel(event);
+        }
     }
 
     void on_del(ntt_event_source_t* src)
     {
         close(fd);
         ntt_event_source_destroy(src);
+        std::lock_guard l { g_cout_mutex };
+        std::cout << "writer destroyed \"";
     }
 
     static void on_del_svc(ntt_event_source_t* src, void* ctx)
@@ -150,6 +181,12 @@ struct DummyPipeWriter {
         return static_cast<DummyPipeWriter*>(ctx)->on_del(src);
     }
 
+    [[nodiscard]] bool is_closing() const
+    {
+        return remain_to_close != std::numeric_limits<std::size_t>::max();
+    }
+
+    std::size_t remain_to_close = std::numeric_limits<std::size_t>::max();
     ntt_event_source_t* event;
     std::mutex m;
     bool wait_ready { false };
@@ -162,6 +199,8 @@ ntt_event_handler_tbl_t g_pipe_writer_event_handler_tbl = {
     .on_ready_cb = DummyPipeWriter::wakeup_svc,
     .on_del_cb = DummyPipeWriter::on_del_svc,
 };
+
+std::size_t transferred_bytes_tx = 0;
 
 TEST_F(PoolTest, Pipe)
 {
@@ -193,13 +232,20 @@ TEST_F(PoolTest, Pipe)
     DummyPipeWriter writer;
     writer.fd = fifo[1];
 
-    auto *write_source = ntt_event_source_create(pool, &g_pipe_writer_event_handler_tbl, &writer, fifo[1], NTT_WRITE_EVENT);
+    auto* write_source = ntt_event_source_create(
+        pool,
+        &g_pipe_writer_event_handler_tbl,
+        &writer,
+        fifo[1],
+        NTT_WRITE_EVENT);
+
     writer.event = write_source;
     ntt_event_source_start(write_source);
 
     for (std::size_t i = 0; i < g_cnt; ++i) {
-        std::array<std::uint8_t, 16> data {};
+        std::array<std::uint8_t, 1024> data {};
         writer.write(data);
+        transferred_bytes_tx += 1024;
         std::this_thread::sleep_for(std::chrono::microseconds { 1 });
     }
 
@@ -209,4 +255,8 @@ TEST_F(PoolTest, Pipe)
 
     ntt_pool_release(pool);
     f.wait();
+
+    std::cout << "TX: " << transferred_bytes_tx << '\n';
+    std::cout << "RX: " << transferred_bytes_rx << '\n';
+    ASSERT_EQ(transferred_bytes_tx, transferred_bytes_rx);
 }

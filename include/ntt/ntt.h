@@ -5,6 +5,7 @@
 #include "ntt/pool.h"
 #include "ntt/queue.h"
 #include "ntt/reader.h"
+#include "ntt/selector.h"
 #include "ntt/session.h"
 #include "ntt/sockaddr.h"
 #include "ntt/task.h"

@@ -3,12 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-char* ntt_cstr_from_view(ntt_view_t view)
+ntt_cstr_t ntt_cstr_from_view(ntt_view_t view)
 {
-    char* v = malloc(view.len + 1);
-    memcpy(v, view.str, view.len);
-    v[view.len] = '\0';
-    return v;
+    ntt_cstr_t str;
+    str.data = malloc(view.len + 1);
+    memcpy(str.data, view.str, view.len);
+    str.data[view.len] = '\0';
+    return str;
 }
-
-void ntt_cstr_free(char* cstr) { free(cstr); }

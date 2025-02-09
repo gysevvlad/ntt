@@ -56,12 +56,12 @@ int ntt_sockaddr_in6_from_view(struct sockaddr_in6* addr, ntt_view_t view)
     memset(&hints, 0, sizeof(struct addrinfo));
     hints.ai_family = AF_INET6;
 
-    char* addr_str = ntt_cstr_from_view(head_view);
-    char* port_str = ntt_cstr_from_view(port_view);
+    ntt_cstr_t addr_str = ntt_cstr_from_view(head_view);
+    ntt_cstr_t port_str = ntt_cstr_from_view(port_view);
     struct addrinfo* result;
-    int rc = getaddrinfo(addr_str, port_str, &hints, &result);
-    ntt_cstr_free(port_str);
-    ntt_cstr_free(addr_str);
+    int rc = getaddrinfo(addr_str.data, port_str.data, &hints, &result);
+    ntt_cstr_free(&port_str);
+    ntt_cstr_free(&addr_str);
     if (rc != 0) {
         return 0;
     }

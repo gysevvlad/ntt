@@ -32,9 +32,16 @@ struct ntt_thread {
     ntt_task_node_t tasks_sentinel; // last thread task
 };
 
-void ntt_thread_init(ntt_thread_t* self,
+ntt_thread_t* ntt_thread_create(
     void (*complete_cb)(ntt_thread_t* thread, void* context),
-    void* context, int epoll_fd);
+    void* context,
+    int epoll_fd);
+
+void ntt_thread_init(
+    ntt_thread_t* self,
+    void (*complete_cb)(ntt_thread_t* thread, void* context),
+    void* context,
+    int epoll_fd);
 
 /**
  * @brief Send task to thread.
