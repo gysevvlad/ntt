@@ -11,3 +11,4 @@
 #include "ntt/task.h"
 #include "ntt/task_queue.h"
 #include "ntt/util.h"
+#include "ntt/worker.h"

@@ -2,8 +2,15 @@ cmake_minimum_required(VERSION 3.23)
 
 project(ntt)
 
-add_subdirectory(thd SYSTEM)
+# override default "-g" flag for Debug profile
+string(REPLACE "-g" "-g -gdwarf-4" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+string(REPLACE "-g" "-g -gdwarf-4" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
 
+# override default "-O2 -g -DNDEBUG" flags for RelWithDebInfo profile
+string(REPLACE "-O2" "-O3" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+string(REPLACE "-g" "-g -gdwarf-4" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}") 
+
+add_subdirectory(thd SYSTEM)
 
 #[[ base obj library ]]#
 
@@ -30,18 +37,19 @@ target_sources(ntt
     src/connect_request.c
     src/context.c
     src/cstr.c
+    src/error.c
     src/event_source.c
     src/impl/sockaddr_in.c
     src/impl/sockaddr_in6.c
     src/impl/sockaddr_un.c
     src/in6_addr.c
     src/in_addr.c
+    src/malloc.c
     src/pool.c
     src/queue.c
     src/reader.c
     src/selector.c
     src/session.c
-    src/error.c
     src/sockaddr.c
     src/task.c
     src/task_cache.c
@@ -49,15 +57,16 @@ target_sources(ntt
     src/thread.c
     src/util.c
     src/view.c
+    src/worker.c
   PRIVATE
     FILE_SET ntt_impl_headers
     TYPE HEADERS
     FILES
       include/ntt/impl/connect_request.h
-      include/ntt/impl/context.h
       include/ntt/impl/event_source.h
       include/ntt/impl/in6_addr.h
       include/ntt/impl/in_addr.h
+      include/ntt/impl/malloc.h
       include/ntt/impl/selector.h
       include/ntt/impl/session.h
       include/ntt/impl/sockaddr_in.h
@@ -65,6 +74,7 @@ target_sources(ntt
       include/ntt/impl/sockaddr_un.h
       include/ntt/impl/table.h
       include/ntt/impl/tcp_source.h
+      include/ntt/impl/worker.h
     BASE_DIRS
       include
   PUBLIC
@@ -74,7 +84,6 @@ target_sources(ntt
       ${CMAKE_CURRENT_BINARY_DIR}/include/ntt/export.h
       include/ntt/accept_source.h
       include/ntt/connect_request.h
-      include/ntt/context.h
       include/ntt/cstr.h
       include/ntt/defs.h
       include/ntt/event_source.h
@@ -86,6 +95,7 @@ target_sources(ntt
       include/ntt/tcp_source.h
       include/ntt/util.h
       include/ntt/view.h
+      include/ntt/worker.h
     BASE_DIRS
       ${CMAKE_CURRENT_BINARY_DIR}/include
       include)
@@ -133,6 +143,7 @@ add_executable(ntt_unit_tests
   tests/TaskTest.cpp
   tests/ThreadTest.cpp
   tests/UtilTest.cpp
+  tests/WorkerTest.cpp
 )
 
 set_target_properties(
@@ -174,5 +185,3 @@ add_test(NAME unit_tests COMMAND ntt_unit_tests)
 #   DESTINATION lib/ntt/cmake)
 
 # add_subdirectory(learn)
-
-add_subdirectory(lessons)
