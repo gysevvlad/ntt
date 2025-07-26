@@ -1,14 +1,17 @@
 #pragma once
 
-#include "ntt/accept_source.h"
-#include "ntt/connect_request.h"
-#include "ntt/pool.h"
-#include "ntt/queue.h"
-#include "ntt/reader.h"
-#include "ntt/selector.h"
-#include "ntt/session.h"
-#include "ntt/sockaddr.h"
-#include "ntt/task.h"
-#include "ntt/task_queue.h"
-#include "ntt/util.h"
-#include "ntt/worker.h"
+#include "ntt/accept_source.h" // IWYU pragma: export
+#include "ntt/connect_request.h" // IWYU pragma: export
+#include "ntt/loop.h" // IWYU pragma: export
+#include "ntt/pool.h" // IWYU pragma: export
+#include "ntt/queue.h" // IWYU pragma: export
+#include "ntt/reader.h" // IWYU pragma: export
+#include "ntt/selector.h" // IWYU pragma: export
+#include "ntt/session.h" // IWYU pragma: export
+#include "ntt/signal.h" // IWYU pragma: export
+#include "ntt/signal_source.h" // IWYU pragma: export
+#include "ntt/sockaddr.h" // IWYU pragma: export
+#include "ntt/task.h" // IWYU pragma: export
+#include "ntt/task_queue.h" // IWYU pragma: export
+#include "ntt/util.h" // IWYU pragma: export
+#include "ntt/worker.h" // IWYU pragma: export

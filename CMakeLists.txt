@@ -44,12 +44,15 @@ target_sources(ntt
     src/impl/sockaddr_un.c
     src/in6_addr.c
     src/in_addr.c
+    src/loop.c
     src/malloc.c
     src/pool.c
     src/queue.c
     src/reader.c
     src/selector.c
     src/session.c
+    src/signal.c
+    src/signal_source.c
     src/sockaddr.c
     src/task.c
     src/task_cache.c
@@ -89,6 +92,8 @@ target_sources(ntt
       include/ntt/event_source.h
       include/ntt/pool.h
       include/ntt/session.h
+      include/ntt/signal.h
+      include/ntt/signal_source.h
       include/ntt/sockaddr.h
       include/ntt/task.h
       include/ntt/task_queue.h
@@ -136,6 +141,7 @@ target_link_libraries(ntt_shared PUBLIC ntt)
 
 add_executable(ntt_unit_tests
   tests/AcceptSourceTest.cpp
+  # tests/LoopTest.cpp
   tests/Pool2Test.cpp
   tests/PoolTest.cpp
   tests/SelectorTest.cpp
@@ -161,6 +167,12 @@ target_link_libraries(ntt_unit_tests PkgConfig::jemalloc ntt_shared Boost::heade
 target_link_libraries(ntt_unit_tests ntt_static Boost::headers GTest::gtest_main GTest::gtest)
 
 add_test(NAME unit_tests COMMAND ntt_unit_tests)
+
+add_executable(example-00 example/example-00.c)
+target_link_libraries(example-00 PRIVATE ntt_shared)
+
+add_executable(example-01 example/example-01.c)
+target_link_libraries(example-01 PRIVATE ntt_shared)
 
 #[[ ntt package ]]#
 # TODO: provide ntt package

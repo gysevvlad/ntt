@@ -1,14 +1,19 @@
-Checks: '
+Checks: "
     *,
     -altera-id-dependent-backward-branch,
     -altera-struct-pack-align,
     -altera-unroll-loops,
     -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
     -cppcoreguidelines-pro-type-reinterpret-cast,
+    -fuchsia-default-arguments-calls,
     -hicpp-no-array-decay,
     -llvmlibc-callee-namespace,
     -llvmlibc-implementation-in-namespace,
     -llvmlibc-restrict-system-libc-headers,
     -modernize-use-trailing-return-type,
-    -readability-identifier-length,
-'
+    -readability-identifier-length"
+CheckOptions:
+    - key: cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor
+      value: true
+    - key: hicpp-special-member-functions.AllowSoleDefaultDtor
+      value: true

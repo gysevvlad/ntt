@@ -27,7 +27,8 @@ static inline ntt_task_t* ntt_task_init(ntt_task_node_t* task_node,
     return &task_node->payload;
 }
 
-static inline ntt_task_node_t* ntt_make_task_impl(ntt_task_cb_t* task_cb,
+static inline ntt_task_node_t* ntt_make_task_impl(
+    ntt_task_cb_t* task_cb,
     ntt_free_cb_t* free_cb)
 {
     ntt_task_node_t* task_node = (ntt_task_node_t*)malloc(sizeof(ntt_task_node_t));

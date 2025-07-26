@@ -175,7 +175,7 @@ void ntt_pool_release(ntt_pool_t* self)
     }
 }
 
-typedef struct barrier_task {
+typedef struct ntt_barrier_task {
     atomic_size_t refs;
     ntt_task_t* task;
     ntt_task_node_t task_nodes[];
@@ -185,7 +185,7 @@ void ntt_barrier_task_svc(void* ctx)
 {
     ntt_task_node_t* task_node = ctx;
 
-    struct barrier_task* self = *(struct barrier_task**)task_node->payload;
+    struct ntt_barrier_task* self = *(struct ntt_barrier_task**)task_node->payload;
 
     if (atomic_fetch_sub(&self->refs, 1) != 1) {
         return;
@@ -202,13 +202,13 @@ void ntt_barrier_dummy_call(void* ctx)
 
 void ntt_pool_post_barrier_task(ntt_pool_t* self, ntt_task_t* task)
 {
-    struct barrier_task* barrier = malloc(sizeof(struct barrier_task) + sizeof(ntt_task_node_t) * self->thread_cnt);
+    struct ntt_barrier_task* barrier = malloc(sizeof(struct ntt_barrier_task) + sizeof(ntt_task_node_t) * self->thread_cnt);
     barrier->task = task;
     barrier->refs = self->thread_cnt;
     unsigned int i;
     for (i = 0; i < self->thread_cnt; ++i) {
         ntt_task_t* nth_task = ntt_task_init(&barrier->task_nodes[i], ntt_barrier_dummy_call, ntt_barrier_task_svc);
-        *(struct barrier_task**)nth_task = barrier;
+        *(struct ntt_barrier_task**)nth_task = barrier;
         ntt_thread_send_task(&self->threads[i], nth_task);
     }
 }
