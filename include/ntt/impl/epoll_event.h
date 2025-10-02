@@ -4,6 +4,7 @@
 #include <ntt/impl/atomic.h>
 
 #include <assert.h>
+#include <stddef.h>
 
 #include <sys/epoll.h>
 
@@ -29,10 +30,26 @@ struct ntt_epoll_event {
     void* ctx;
     int fd;
     uint32_t events;
-    void* loop;
 
+    void* loop;
     atomic_uint_fast8_t state;
 };
+
+static inline void ntt_epoll_event_init(
+    ntt_epoll_event_t* self,
+    const ntt_epoll_event_vtbl_t* vtbl,
+    void* ctx,
+    int fd,
+    uint32_t events)
+{
+    self->vtbl = vtbl;
+    self->ctx = ctx;
+    self->fd = fd;
+    self->events = events;
+
+    self->loop = NULL;
+    self->state = 0b00;
+}
 
 static inline int ntt_event_state_lock_read(atomic_uint_fast8_t* self)
 {

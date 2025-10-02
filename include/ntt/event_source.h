@@ -5,14 +5,12 @@
 
 EXTERN_START
 
-typedef struct ntt_event_source ntt_event_source_t;
+typedef enum ntt_interest {
+    NTT_INTEREST_READABLE = 0b01,
+    NTT_INTEREST_WRITABLE = 0b10,
+} ntt_interest_t;
 
-typedef enum ntt_event_type {
-    // clang-format off
-    NTT_READ_EVENT   = 0b01,
-    NTT_WRITE_EVENT  = 0b10,
-    // clang-format on
-} ntt_event_type_t;
+typedef struct ntt_event ntt_event_t;
 
 typedef int(ntt_on_ready_cb)(ntt_event_source_t* src, void* ctx, int events);
 typedef int(ntt_on_write_ready_cb)(ntt_event_source_t* src, void* ctx);

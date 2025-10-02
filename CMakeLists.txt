@@ -2,14 +2,6 @@ cmake_minimum_required(VERSION 3.23)
 
 project(ntt)
 
-# override default "-g" flag for Debug profile
-string(REPLACE "-g" "-g -gdwarf-4" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
-string(REPLACE "-g" "-g -gdwarf-4" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
-
-# override default "-O2 -g -DNDEBUG" flags for RelWithDebInfo profile
-string(REPLACE "-O2" "-O3" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
-string(REPLACE "-g" "-g -gdwarf-4" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}") 
-
 add_subdirectory(thd SYSTEM)
 
 #[[ base obj library ]]#
@@ -33,31 +25,32 @@ generate_export_header(ntt EXPORT_FILE_NAME include/ntt/export.h)
 # ntt sources
 target_sources(ntt
   PRIVATE
-    src/accept_source.c
-    src/connect_request.c
-    src/context.c
-    src/cstr.c
+    # src/accept_source.c
+    # src/connect_request.c
+    # src/context.c
+    # src/cstr.c
     src/error.c
-    src/event_source.c
-    src/impl/sockaddr_in.c
-    src/impl/sockaddr_in6.c
-    src/impl/sockaddr_un.c
-    src/in6_addr.c
-    src/in_addr.c
+    # src/event_source.c
+    # src/impl/sockaddr_in.c
+    # src/impl/sockaddr_in6.c
+    # src/impl/sockaddr_un.c
+    # src/in6_addr.c
+    # src/in_addr.c
+    src/event.c
     src/loop.c
     src/malloc.c
-    src/pool.c
-    src/queue.c
-    src/reader.c
-    src/selector.c
-    src/session.c
+    # src/pool.c
+    # src/queue.c
+    # src/reader.c
+    # src/selector.c
+    # src/session.c
     src/signal.c
     src/signal_source.c
-    src/sockaddr.c
+    # src/sockaddr.c
     src/task.c
-    src/task_cache.c
-    src/tcp_source.c
-    src/thread.c
+    # src/task_cache.c
+    # src/tcp_source.c
+    # src/thread.c
     src/util.c
     src/view.c
     src/worker.c
@@ -140,16 +133,17 @@ target_link_libraries(ntt_shared PUBLIC ntt)
 #[[ unit tests ]]#
 
 add_executable(ntt_unit_tests
-  tests/AcceptSourceTest.cpp
+  # tests/AcceptSourceTest.cpp
   # tests/LoopTest.cpp
-  tests/Pool2Test.cpp
-  tests/PoolTest.cpp
-  tests/SelectorTest.cpp
-  tests/SockaddrTest.cpp
+  # tests/Pool2Test.cpp
+  # tests/PoolTest.cpp
+  # tests/SelectorTest.cpp
+  # tests/SockaddrTest.cpp
   tests/TaskTest.cpp
-  tests/ThreadTest.cpp
+  # tests/ThreadTest.cpp
   tests/UtilTest.cpp
   tests/WorkerTest.cpp
+  tests/EventTest.cpp
 )
 
 set_target_properties(
@@ -173,6 +167,9 @@ target_link_libraries(example-00 PRIVATE ntt_shared)
 
 add_executable(example-01 example/example-01.c)
 target_link_libraries(example-01 PRIVATE ntt_shared)
+
+add_executable(example-02 example/example-02.c)
+target_link_libraries(example-02 PRIVATE ntt_shared)
 
 #[[ ntt package ]]#
 # TODO: provide ntt package

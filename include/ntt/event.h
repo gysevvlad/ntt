@@ -1,40 +1,44 @@
 #pragma once
 
 #include "ntt/defs.h"
-#include "ntt/pool.h"
+#include "ntt/ec.h"
+#include "ntt/export.h"
+#include "ntt/loop.h"
 
 EXTERN_START
 
-typedef struct ntt_event_source ntt_event_source_t;
+typedef enum ntt_interest {
+    NTT_INTEREST_READABLE = 0b01,
+    NTT_INTEREST_WRITABLE = 0b10,
+} ntt_interest_t;
 
-typedef enum ntt_event_type {
-    NTT_READ_EVENT = 0b01,
-    NTT_WRITE_EVENT = 0b10,
-} ntt_event_type_t;
-
-typedef int(ntt_event_ready_cb)(ntt_event_source_t* src, void* ctx, int events);
-typedef void(ntt_event_canceled_cb)(ntt_event_source_t* src, void* ctx);
+typedef struct ntt_event ntt_event_t;
 
 typedef struct ntt_event_vtbl {
     const char* name;
-    ntt_event_ready_cb* ready_cb;
-    ntt_event_canceled_cb* canceled_cb;
+    void (*ntt_event_svc_cb)(ntt_event_t* self, void* ctx, ntt_interest_t interest);
+    void (*ntt_event_stopped_cb)(ntt_event_t* self, void* ctx, ntt_ec_t ec);
 } ntt_event_vtbl_t;
 
-NTT_EXPORT ntt_event_source_t* ntt_event_source_create(
-    ntt_pool_t* pool,
-    const ntt_event_vtbl_t* handler_tbl,
-    void* handler_ctx,
+NTT_EXPORT ntt_event_t* ntt_event_create(
+    const ntt_event_vtbl_t* vtbl,
+    void* ctx,
     int fd,
-    int events);
+    ntt_interest_t interest);
 
-NTT_EXPORT void ntt_event_source_start(
-    ntt_event_source_t* self);
+/**
+ * Start listening event.
+ *
+ * NB! This method should only be called once.
+ */
+NTT_EXPORT void ntt_event_start(
+    ntt_event_t* self,
+    ntt_loop_t* loop);
 
-NTT_EXPORT void ntt_event_source_cancel(
-    ntt_event_source_t* self);
+NTT_EXPORT void ntt_event_cancel(
+    ntt_event_t* self);
 
-NTT_EXPORT void ntt_event_source_destroy(
-    ntt_event_source_t* self);
+NTT_EXPORT void ntt_event_delete(
+    ntt_event_t* self);
 
 EXTERN_STOP

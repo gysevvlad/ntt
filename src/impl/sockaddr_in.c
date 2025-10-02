@@ -11,7 +11,7 @@ int ntt_sockaddr_in_from_view(struct sockaddr_in* addr, ntt_view_t view)
 
     ntt_view_split_by_char(view, ':', &addr_view, &port_view);
 
-    unsigned short port_value;
+    unsigned short port_value = 0;
     if (!ntt_unsigned_short_from_view(&port_value, port_view)) {
         return 0;
     }

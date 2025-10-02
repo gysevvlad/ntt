@@ -1,0 +1,24 @@
+{
+    "msg_type": "robot_create_request",
+    "data": {
+        "robot_name": "SMTA_OTC_beta",
+        "parameters": {
+            "src_service": {
+                "value": "tbc.sor_test.engine",
+                "type": "str"
+            },
+            "src_instruments": {
+                "value": [
+                    {
+                        "type": "str",
+                        "value": "LINKETH"
+                    }
+                ],
+                "type": "vec_of_any"
+            }
+        },
+        "robot_id": "c882e628-1866-4ccc-bf16-2a5403531682",
+        "robot_type": "MDListener",
+        "request_id": "1efa26a1-36c5-4d80-992f-be474c6b6dbe"
+    }
+}

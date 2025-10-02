@@ -41,7 +41,7 @@ static inline ntt_ec_t ntt_make_system_ec(int rc)
 static inline ntt_ec_t ntt_make_ok_ec()
 {
     ntt_ec_t ec;
-    ec.category.tbl = NULL;
+    ec.category.tbl = &ntt_system_error_category_tbl;
     ec.ec = 0;
     return ec;
 }

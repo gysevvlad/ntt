@@ -13,10 +13,6 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
-            },
-            "environment": {
-                "CXX": "/usr/bin/clang++-18",
-                "CC": "/usr/bin/clang-18"
             }
         },
         {

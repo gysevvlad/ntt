@@ -5,6 +5,7 @@
 
 #include "ntt/impl/sockaddr.h"
 
+#include <assert.h>
 #include <errno.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -12,6 +13,8 @@
 #include <unistd.h>
 
 typedef int ntt_socket_t;
+
+#define NTT_INVALID_SOCKET (-1)
 
 static inline int ntt_socket_make_from_sockaddr(int* self, ntt_sockaddr_t* sockaddr)
 {
@@ -26,7 +29,7 @@ static inline int ntt_socket_make_from_sockaddr(int* self, ntt_sockaddr_t* socka
     return 0;
 }
 
-static inline int ntt_socket_set_reuse_addr(int* self)
+static inline int ntt_socket_set_reuse_addr(const int* self)
 {
     assert(*self != -1);
 
@@ -36,7 +39,7 @@ static inline int ntt_socket_set_reuse_addr(int* self)
     return 0;
 }
 
-static inline int ntt_socket_bind(int* self, ntt_sockaddr_t* sockaddr)
+static inline int ntt_socket_bind(const int* self, ntt_sockaddr_t* sockaddr)
 {
     int len = 0;
     switch (sockaddr->storage.ss_family) {
@@ -48,6 +51,9 @@ static inline int ntt_socket_bind(int* self, ntt_sockaddr_t* sockaddr)
         break;
     case AF_UNIX:
         len = sizeof(struct sockaddr_un);
+        break;
+    default:
+        len = 0;
         break;
     }
 
