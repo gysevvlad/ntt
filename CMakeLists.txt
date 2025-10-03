@@ -27,14 +27,13 @@ target_sources(ntt
     # src/accept_source.c
     # src/connect_request.c
     # src/context.c
-    # src/cstr.c
     src/error.c
     # src/event_source.c
-    # src/impl/sockaddr_in.c
-    # src/impl/sockaddr_in6.c
-    # src/impl/sockaddr_un.c
-    # src/in6_addr.c
-    # src/in_addr.c
+    src/impl/sockaddr_in.c
+    src/impl/sockaddr_in6.c
+    src/impl/sockaddr_un.c
+    src/in6_addr.c
+    src/in_addr.c
     src/event.c
     src/loop.c
     src/malloc.c
@@ -44,8 +43,9 @@ target_sources(ntt
     # src/selector.c
     # src/session.c
     src/signal.c
+    src/cstr.c
     src/signal_source.c
-    # src/sockaddr.c
+    src/sockaddr.c
     src/task.c
     # src/task_cache.c
     # src/tcp_source.c
@@ -79,8 +79,8 @@ target_sources(ntt
       ${CMAKE_CURRENT_BINARY_DIR}/include/ntt/export.h
       include/ntt/accept_source.h
       include/ntt/connect_request.h
-      include/ntt/cstr.h
       include/ntt/defs.h
+      include/ntt/cstr.h
       include/ntt/event_source.h
       include/ntt/reader.h
       include/ntt/session.h
@@ -116,7 +116,7 @@ add_executable(ntt_unit_tests
   # tests/Pool2Test.cpp
   # tests/PoolTest.cpp
   # tests/SelectorTest.cpp
-  # tests/SockaddrTest.cpp
+  tests/SockaddrTest.cpp
   tests/TaskTest.cpp
   # tests/ThreadTest.cpp
   tests/UtilTest.cpp

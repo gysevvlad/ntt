@@ -1,4 +1,3 @@
-#include "ntt/cstr.h"
 #include "ntt/ec.h"
 
 #include <pthread.h>

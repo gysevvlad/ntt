@@ -2,7 +2,10 @@
 
 #include <string.h>
 
-int ntt_view_split_by_char(ntt_view_t view, char delimeter, ntt_view_t* head,
+int ntt_view_split_by_char(
+    ntt_view_t view,
+    char delimeter,
+    ntt_view_t* head,
     ntt_view_t* tail)
 {
     size_t i;
