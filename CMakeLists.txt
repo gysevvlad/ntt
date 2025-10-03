@@ -1,12 +1,11 @@
-cmake_minimum_required(VERSION 3.23)
+cmake_minimum_required(VERSION 3.22)
 
 project(ntt)
 
-add_subdirectory(thd SYSTEM)
-
 #[[ base obj library ]]#
 
-add_library(ntt OBJECT)
+add_library(ntt)
+add_library(ntt::ntt ALIAS ntt)
 
 # setup properties
 set_target_properties(ntt
@@ -16,7 +15,7 @@ set_target_properties(ntt
     C_EXTENSIONS on
     C_VISIBILITY_PRESET hidden
     POSITION_INDEPENDENT_CODE true
-    INTERPROCEDURAL_OPTIMIZATION false)
+    INTERPROCEDURAL_OPTIMIZATION true)
 
 # generate export header
 include(GenerateExportHeader)
@@ -41,7 +40,7 @@ target_sources(ntt
     src/malloc.c
     # src/pool.c
     # src/queue.c
-    # src/reader.c
+    src/reader.c
     # src/selector.c
     # src/session.c
     src/signal.c
@@ -55,9 +54,9 @@ target_sources(ntt
     src/view.c
     src/worker.c
   PRIVATE
-    FILE_SET ntt_impl_headers
-    TYPE HEADERS
-    FILES
+    # FILE_SET ntt_impl_headers
+    # TYPE HEADERS
+    # FILES
       include/ntt/impl/connect_request.h
       include/ntt/impl/event_source.h
       include/ntt/impl/in6_addr.h
@@ -71,19 +70,19 @@ target_sources(ntt
       include/ntt/impl/table.h
       include/ntt/impl/tcp_source.h
       include/ntt/impl/worker.h
-    BASE_DIRS
-      include
-  PUBLIC
-    FILE_SET ntt_public_headers
-    TYPE HEADERS
-    FILES
+    # BASE_DIRS
+    #   include
+  # PUBLIC
+  #   FILE_SET ntt_public_headers
+  #   TYPE HEADERS
+  #   FILES
       ${CMAKE_CURRENT_BINARY_DIR}/include/ntt/export.h
       include/ntt/accept_source.h
       include/ntt/connect_request.h
       include/ntt/cstr.h
       include/ntt/defs.h
       include/ntt/event_source.h
-      include/ntt/pool.h
+      include/ntt/reader.h
       include/ntt/session.h
       include/ntt/signal.h
       include/ntt/signal_source.h
@@ -94,41 +93,20 @@ target_sources(ntt
       include/ntt/util.h
       include/ntt/view.h
       include/ntt/worker.h
-    BASE_DIRS
-      ${CMAKE_CURRENT_BINARY_DIR}/include
-      include)
+    # BASE_DIRS
+    #   ${CMAKE_CURRENT_BINARY_DIR}/include
+    #   include
+)
+
+target_include_directories(ntt
+  PUBLIC 
+    ${CMAKE_CURRENT_BINARY_DIR}/include
+    include)
 
 # links
 
-# TODO: cmake dependency management
-include(FindPkgConfig)
 find_package(Threads REQUIRED)
-target_link_libraries(ntt PUBLIC PRIVATE Threads::Threads)
-
-
-#[[ static ntt lib ]]#
-
-add_library(ntt_static STATIC)
-set_target_properties(ntt_static PROPERTIES OUTPUT_NAME "ntt")
-target_link_libraries(ntt_static PUBLIC ntt)
-
-
-#[[ shared ntt lib ]]#
-
-add_library(ntt_shared SHARED)
-set_target_properties(ntt_shared PROPERTIES OUTPUT_NAME "ntt")
-target_link_libraries(ntt_shared PUBLIC ntt)
-
-
-#[[ internal tests ]]#
-
-# add_executable(ntt_internal_tests
-#   src/queue_test.c)
-
-# target_link_libraries(ntt_internal_tests ntt_static ntt::thd::criterion)
-
-# add_test(NAME internal_tests COMMAND ntt_internal_tests)
-
+target_link_libraries(ntt PRIVATE Threads::Threads)
 
 #[[ unit tests ]]#
 
@@ -143,7 +121,6 @@ add_executable(ntt_unit_tests
   # tests/ThreadTest.cpp
   tests/UtilTest.cpp
   tests/WorkerTest.cpp
-  tests/EventTest.cpp
 )
 
 set_target_properties(
@@ -154,22 +131,23 @@ set_target_properties(
     CXX_EXTENSIONS on)
 
 # TODO: cmake dependency management
-find_package(GTest)
+find_package(GTest REQUIRED)
 find_package(Boost REQUIRED)
-pkg_search_module(jemalloc REQUIRED IMPORTED_TARGET jemalloc)
-target_link_libraries(ntt_unit_tests PkgConfig::jemalloc ntt_shared Boost::headers GTest::gtest_main GTest::gtest)
-target_link_libraries(ntt_unit_tests ntt_static Boost::headers GTest::gtest_main GTest::gtest)
+target_link_libraries(ntt_unit_tests ntt::ntt Boost::headers GTest::gtest_main GTest::gtest)
 
 add_test(NAME unit_tests COMMAND ntt_unit_tests)
 
 add_executable(example-00 example/example-00.c)
-target_link_libraries(example-00 PRIVATE ntt_shared)
+target_link_libraries(example-00 PRIVATE ntt::ntt)
 
 add_executable(example-01 example/example-01.c)
-target_link_libraries(example-01 PRIVATE ntt_shared)
+target_link_libraries(example-01 PRIVATE ntt::ntt)
 
 add_executable(example-02 example/example-02.c)
-target_link_libraries(example-02 PRIVATE ntt_shared)
+target_link_libraries(example-02 PRIVATE ntt::ntt)
+
+add_executable(example-03 example/example-03.c)
+target_link_libraries(example-03 PRIVATE ntt::ntt)
 
 #[[ ntt package ]]#
 # TODO: provide ntt package

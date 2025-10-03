@@ -28,9 +28,9 @@ enum ntt_event_state {
 struct ntt_epoll_event {
     const ntt_epoll_event_vtbl_t* vtbl;
     void* ctx;
-    int fd;
     uint32_t events;
 
+    int fd;
     void* loop;
     atomic_uint_fast8_t state;
 };
@@ -39,15 +39,14 @@ static inline void ntt_epoll_event_init(
     ntt_epoll_event_t* self,
     const ntt_epoll_event_vtbl_t* vtbl,
     void* ctx,
-    int fd,
     uint32_t events)
 {
-    self->vtbl = vtbl;
-    self->ctx = ctx;
-    self->fd = fd;
+    self->vtbl   = vtbl;
+    self->ctx    = ctx;
     self->events = events;
 
-    self->loop = NULL;
+    self->fd    = -1;
+    self->loop  = NULL;
     self->state = 0b00;
 }
 

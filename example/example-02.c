@@ -88,8 +88,8 @@ void ntt_loop_started(ntt_loop_t* loop, void* ctx)
         abort();
     }
 
-    app->stdin_event = ntt_event_create(&g_stdin_reader, app, STDIN_FILENO, NTT_INTEREST_READABLE);
-    ntt_event_start(app->stdin_event, loop);
+    app->stdin_event = ntt_event_create(&g_stdin_reader, app, NTT_INTEREST_READABLE);
+    ntt_event_start(app->stdin_event, STDIN_FILENO, loop);
 
     ntt_signal_source_start(app_from_ctx(ctx)->signal_source, loop);
     printf("waiting signal...\n");

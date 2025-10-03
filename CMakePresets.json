@@ -9,7 +9,6 @@
         {
             "name": "debug",
             "binaryDir": "${sourceDir}/build/${presetName}",
-            "generator": "Ninja",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
@@ -18,7 +17,6 @@
         {
             "name": "perf",
             "binaryDir": "${sourceDir}/build/${presetName}",
-            "generator": "Ninja",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"

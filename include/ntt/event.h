@@ -23,7 +23,6 @@ typedef struct ntt_event_vtbl {
 NTT_EXPORT ntt_event_t* ntt_event_create(
     const ntt_event_vtbl_t* vtbl,
     void* ctx,
-    int fd,
     ntt_interest_t interest);
 
 /**
@@ -33,6 +32,7 @@ NTT_EXPORT ntt_event_t* ntt_event_create(
  */
 NTT_EXPORT void ntt_event_start(
     ntt_event_t* self,
+    int fd,
     ntt_loop_t* loop);
 
 NTT_EXPORT void ntt_event_cancel(

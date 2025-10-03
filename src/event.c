@@ -1,7 +1,7 @@
-#include "ntt/event.h"
-
+#include "./event.h"
 #include "ntt/defs.h"
 #include "ntt/ec.h"
+#include "ntt/event.h"
 #include "ntt/impl/atomic.h"
 #include "ntt/impl/epoll_event.h"
 #include "ntt/impl/loop.h"
@@ -10,14 +10,6 @@
 #include <sys/epoll.h>
 
 #include <assert.h>
-
-struct ntt_event {
-    const ntt_event_vtbl_t* vtbl;
-    void* ctx;
-    ntt_interest_t interest;
-    atomic_uint_fast8_t state;
-    ntt_epoll_event_t raw_event;
-};
 
 enum NTT_EVENT_STATE {
     NTT_EVENT_STATE_CREATED  = 0b00000000,
@@ -69,11 +61,10 @@ const static ntt_epoll_event_vtbl_t g_event_vtbl = {
     .cancelled = ntt_epoll_event_stopped,
 };
 
-static void ntt_event_init(
+void ntt_event_init(
     ntt_event_t* self,
     const ntt_event_vtbl_t* vtbl,
     void* ctx,
-    int fd,
     ntt_interest_t interest)
 {
     assert(interest != 0b00);
@@ -92,13 +83,12 @@ static void ntt_event_init(
     self->ctx      = ctx;
     self->interest = interest;
     self->state    = NTT_EVENT_STATE_CREATED;
-    ntt_epoll_event_init(&self->raw_event, &g_event_vtbl, self, fd, events);
+    ntt_epoll_event_init(&self->raw_event, &g_event_vtbl, self, events);
 }
 
 ntt_event_t* ntt_event_create(
     const ntt_event_vtbl_t* vtbl,
     void* ctx,
-    int fd,
     ntt_interest_t interest)
 {
     ntt_event_t* self = ntt_malloc(sizeof(ntt_event_t));
@@ -107,13 +97,17 @@ ntt_event_t* ntt_event_create(
         return self;
     }
 
-    ntt_event_init(self, vtbl, ctx, fd, interest);
+    ntt_event_init(self, vtbl, ctx, interest);
 
     return self;
 }
 
-void ntt_event_start(ntt_event_t* self, ntt_loop_t* loop)
+void ntt_event_start(
+    ntt_event_t* self,
+    int fd,
+    ntt_loop_t* loop)
 {
+    self->raw_event.fd = fd;
     ntt_loop_add_epoll_event(loop, &self->raw_event);
 
     uint8_t state = NTT_EVENT_STATE_CREATED;
@@ -149,8 +143,7 @@ void ntt_event_cancel(ntt_event_t* self)
     ntt_loop_del_epoll_event(self->raw_event.loop, &self->raw_event);
 }
 
-void ntt_event_delete(
-    ntt_event_t* self)
+void ntt_event_delete(ntt_event_t* self)
 {
     ntt_free(self);
 }
