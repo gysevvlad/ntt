@@ -17,9 +17,9 @@ int ntt_long_from_view(long* value, ntt_view_t view)
     char buffer[32];
     memcpy(buffer, view.str, view.len);
     buffer[view.len] = '\0';
-    char* endptr = NULL;
-    errno = 0;
-    *value = strtol(buffer, &endptr, 10);
+    char* endptr     = NULL;
+    errno            = 0;
+    *value           = strtol(buffer, &endptr, 10);
     return *endptr == '\0' && errno == 0 ? 1 : 0;
 }
 
@@ -50,28 +50,26 @@ int ntt_unsigned_short_formatted_size(unsigned short value)
     return snprintf(NULL, 0, "%i", value);
 }
 
-ntt_char_span_t ntt_unsigned_short_format_to(unsigned short value,
-    ntt_char_span_t buffer)
+size_t ntt_unsigned_short_format_to(unsigned short value, char* buf, size_t len)
 {
-    if (buffer.len == 0) {
-        return buffer;
-    }
     char temp[32];
     size_t l = 0;
     do {
         temp[l++] = value % 10;
-        value = value / 10;
+        value     = value / 10;
     } while (value);
-    size_t r = 0;
-    size_t len = l;
-    if (buffer.len < len) {
-        len = buffer.len;
+
+    size_t size = l;
+    if (size > len) {
+        size = len;
     }
-    size_t i;
-    for (i = 0; i < len; ++i) {
-        buffer.ptr[i] = '0' + temp[--l];
+
+    if (buf != NULL) {
+        size_t i;
+        for (i = 0; i < size; ++i) {
+            buf[i] = '0' + temp[--l];
+        }
     }
-    buffer.len = buffer.len - len;
-    buffer.ptr = buffer.ptr + len;
-    return buffer;
+
+    return size;
 }

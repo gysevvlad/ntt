@@ -5,15 +5,15 @@
 
 EXTERN_START
 
-static inline ntt_char_span_t ntt_char_format_to(char self,
-    ntt_char_span_t buffer)
+static inline size_t ntt_char_format_to(char self, char* buf, size_t size)
 {
-    if (buffer.len > 0) {
-        buffer.ptr[0] = self;
-        buffer.len -= 1;
-        buffer.ptr += 1;
+    if (buf != NULL) {
+        if (ntt_unlikely(size == 0)) {
+            return 0;
+        }
+        buf[0] = self;
     }
-    return buffer;
+    return 1;
 }
 
 EXTERN_STOP

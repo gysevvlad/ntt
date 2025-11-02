@@ -19,7 +19,6 @@ NTT_EXPORT int ntt_unsigned_short_from_cstr(unsigned short* value,
 
 NTT_EXPORT int ntt_unsigned_short_formatted_size(unsigned short value);
 
-NTT_EXPORT ntt_char_span_t ntt_unsigned_short_format_to(unsigned short value,
-    ntt_char_span_t buffer);
+NTT_EXPORT size_t ntt_unsigned_short_format_to(unsigned short value, char* buf, size_t len);
 
 EXTERN_STOP

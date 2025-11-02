@@ -72,12 +72,12 @@ inline void free_task(task* task) { ntt_free_task(task); }
 
 inline std::string to_string(const ntt_sockaddr_t* self)
 {
-    assert(self != nullptr);
-    std::string buffer;
-    buffer.resize(ntt_sockaddr_formatted_size(self));
-    ntt_sockaddr_format_to(
-        self, ntt_char_span_from_len_and_ptr(buffer.length(), buffer.data()));
-    return buffer;
+    // assert(self != nullptr);
+    // std::string buffer;
+    // buffer.resize(ntt_sockaddr_formatted_size(self));
+    // ntt_sockaddr_format_to(
+    //     self, ntt_char_span_from_len_and_ptr(buffer.length(), buffer.data()));
+    // return buffer;
 }
 
 struct context {

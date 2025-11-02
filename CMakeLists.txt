@@ -21,6 +21,9 @@ set_target_properties(ntt
 include(GenerateExportHeader)
 generate_export_header(ntt EXPORT_FILE_NAME include/ntt/export.h)
 
+find_package(PkgConfig REQUIRED)
+pkg_search_module(CARES REQUIRED IMPORTED_TARGET libcares)
+
 # ntt sources
 target_sources(ntt
   PRIVATE
@@ -29,11 +32,6 @@ target_sources(ntt
     # src/context.c
     src/error.c
     # src/event_source.c
-    src/impl/sockaddr_in.c
-    src/impl/sockaddr_in6.c
-    src/impl/sockaddr_un.c
-    src/in6_addr.c
-    src/in_addr.c
     src/event.c
     src/loop.c
     src/malloc.c
@@ -59,14 +57,10 @@ target_sources(ntt
     # FILES
       include/ntt/impl/connect_request.h
       include/ntt/impl/event_source.h
-      include/ntt/impl/in6_addr.h
       include/ntt/impl/in_addr.h
       include/ntt/impl/malloc.h
       include/ntt/impl/selector.h
       include/ntt/impl/session.h
-      include/ntt/impl/sockaddr_in.h
-      include/ntt/impl/sockaddr_in6.h
-      include/ntt/impl/sockaddr_un.h
       include/ntt/impl/table.h
       include/ntt/impl/tcp_source.h
       include/ntt/impl/worker.h
@@ -106,7 +100,7 @@ target_include_directories(ntt
 # links
 
 find_package(Threads REQUIRED)
-target_link_libraries(ntt PRIVATE Threads::Threads)
+target_link_libraries(ntt PRIVATE Threads::Threads PkgConfig::CARES)
 
 #[[ unit tests ]]#
 
@@ -116,7 +110,7 @@ add_executable(ntt_unit_tests
   # tests/Pool2Test.cpp
   # tests/PoolTest.cpp
   # tests/SelectorTest.cpp
-  tests/SockaddrTest.cpp
+  # tests/SockaddrTest.cpp
   tests/TaskTest.cpp
   # tests/ThreadTest.cpp
   tests/UtilTest.cpp
@@ -148,6 +142,9 @@ target_link_libraries(example-02 PRIVATE ntt::ntt)
 
 add_executable(example-03 example/example-03.c)
 target_link_libraries(example-03 PRIVATE ntt::ntt)
+
+add_executable(example-04 example/example-04.c)
+target_link_libraries(example-04 PRIVATE ntt::ntt)
 
 #[[ ntt package ]]#
 # TODO: provide ntt package
