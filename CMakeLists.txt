@@ -110,7 +110,7 @@ add_executable(ntt_unit_tests
   # tests/Pool2Test.cpp
   # tests/PoolTest.cpp
   # tests/SelectorTest.cpp
-  # tests/SockaddrTest.cpp
+  tests/sockaddr_test.cpp
   tests/TaskTest.cpp
   # tests/ThreadTest.cpp
   tests/UtilTest.cpp

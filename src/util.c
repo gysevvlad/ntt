@@ -60,15 +60,18 @@ size_t ntt_unsigned_short_format_to(unsigned short value, char* buf, size_t len)
     } while (value);
 
     size_t size = l;
+
+    if (buf == NULL) {
+        return size;
+    }
+
     if (size > len) {
         size = len;
     }
 
-    if (buf != NULL) {
-        size_t i;
-        for (i = 0; i < size; ++i) {
-            buf[i] = '0' + temp[--l];
-        }
+    size_t i;
+    for (i = 0; i < size; ++i) {
+        buf[i] = '0' + temp[--l];
     }
 
     return size;
