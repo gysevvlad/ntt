@@ -7,7 +7,7 @@ EXTERN_START
 typedef struct ntt_loop ntt_loop_t;
 
 typedef struct ntt_loop_cbs {
-    void (*started)(ntt_loop_t* loop, void* ctx);
+    void (*on_start)(ntt_loop_t* loop, void* ctx);
     void (*on_signal)(ntt_loop_t* loop, void* ctx, int signal);
 } ntt_loop_cbs_t;
 
@@ -16,7 +16,7 @@ static inline ntt_loop_cbs_t ntt_loop_cbs_make(
     void (*on_signal)(ntt_loop_t* loop, void* ctx, int signal))
 {
     ntt_loop_cbs_t cbs;
-    cbs.started   = started;
+    cbs.on_start  = started;
     cbs.on_signal = on_signal;
     return cbs;
 }

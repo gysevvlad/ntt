@@ -29,7 +29,7 @@ public:
         Impl impl { std::forward<Args>(args)... };
         ntt_loop_svc(
             ntt_loop_cbs_t {
-                .started = [](ntt_loop_t* loop, void* ctx) {
+                .on_start = [](ntt_loop_t* loop, void* ctx) {
                     (void)loop;
                     static_cast<ntt::loop*>(ctx)->on_started();
                 },

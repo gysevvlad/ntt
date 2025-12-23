@@ -27,7 +27,7 @@ static void ntt_loop_leader_enter(void* ctx, ntt_worker_t* worker)
     pthread_mutex_unlock(&self->mtx);
 
     self->work_cnt = 1;
-    self->cbs.started(self, self->ctx);
+    self->cbs.on_start(self, self->ctx);
     ntt_loop_work_leave(self);
 }
 
@@ -316,7 +316,7 @@ static void ntt_loop_post_barrier_task(ntt_loop_t* self, ntt_task_t* task)
     for (; i < self->width; ++i) {
         ntt_task_t* nth_task                 = ntt_task_init(&barrier->task_nodes[i], ntt_loop_barrier_dummy_call, ntt_loop_barrier_task_svc);
         *(struct ntt_barrier_task**)nth_task = barrier;
-        ntt_worker_post_task(self->workers[i].worker, nth_task);
+        ntt_worker_send_task(self->workers[i].worker, nth_task);
     }
 }
 

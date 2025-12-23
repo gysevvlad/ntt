@@ -12,8 +12,11 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
+#include <threads.h>
 
 #define SIGRTNTTUP SIGRTMIN
+
+static thread_local ntt_worker_t* t_worker_self = NULL;
 
 static void ntt_process_nttup_signal_handler(int signum, siginfo_t* info, void* context)
 {
@@ -57,7 +60,7 @@ static void ntt_worker_drain_tasks(ntt_worker_t* self)
     } while (!last);
 }
 
-void ntt_worker_construct(
+void ntt_worker_init(
     ntt_worker_t* self,
     ntt_worker_cbs_t cbs,
     void* ctx)
@@ -70,6 +73,9 @@ void ntt_worker_construct(
     self->tasks_up = 0;
     pthread_spin_init(&self->tasks_lock, 0);
     ntt_task_list_init(&self->tasks_lists);
+    self->tasks_pending = 0;
+    // self->wakeup_gen = 0;
+    // self->task_gen = 0;
 
     ntt_task_t* task = ntt_task_init(
         &self->stop_task_node,
@@ -80,7 +86,7 @@ void ntt_worker_construct(
     self->stopped = 0;
 }
 
-void ntt_worker_destruct(
+void ntt_worker_deinit(
     ntt_worker_t* self)
 {
     pthread_spin_destroy(&self->tasks_lock);
@@ -103,7 +109,7 @@ void ntt_worker_release(
         size_t prev = atomic_fetch_sub(&self->refs, 1);
         assert(prev != -1 && "[ntt_worker_release]: trying to release already released object");
         if (prev == 1) {
-            ntt_worker_post_task(self, &self->stop_task_node.payload);
+            ntt_worker_send_task(self, &self->stop_task_node.payload);
         }
     }
 }
@@ -114,7 +120,7 @@ NTT_EXPORT int ntt_worker_svc_with_mask(
     void* ctx)
 {
     ntt_worker_t worker;
-    ntt_worker_construct(&worker, cbs, ctx);
+    ntt_worker_init(&worker, cbs, ctx);
     ntt_process_setup_signal_action();
     worker.id = pthread_self();
 
@@ -146,7 +152,7 @@ NTT_EXPORT int ntt_worker_svc_with_mask(
 
     worker.cbs.leave_cb(worker.ctx);
 
-    ntt_worker_destruct(&worker);
+    ntt_worker_deinit(&worker);
 
     pthread_sigmask(SIG_UNBLOCK, &nttup, NULL);
 
@@ -162,15 +168,20 @@ int ntt_worker_svc(
     return ntt_worker_svc_with_mask(cbs, origin_mask, ctx);
 }
 
-void ntt_worker_post_task(
+void ntt_worker_send_task(
     ntt_worker_t* self,
     ntt_task_t* task)
 {
-    int first = 0;
+    int first   = 0;
+    int pending = 0;
     pthread_spin_lock(&self->tasks_lock);
     ntt_task_list_push(&self->tasks_lists, task, &first);
+    if (self->tasks_pending != 0) {
+        self->tasks_pending = 0;
+        pending             = 1;
+    }
     pthread_spin_unlock(&self->tasks_lock);
-    if (first) {
+    if (first || pending) {
         union sigval sigval;
         sigval.sival_ptr = self;
         int rc           = 0;
@@ -180,3 +191,35 @@ void ntt_worker_post_task(
         assert(rc == 0);
     }
 }
+
+void ntt_worker_post_task(
+    ntt_worker_t* self,
+    ntt_task_t* task)
+{
+    assert(self);
+
+    int first   = 0;
+    int pending = 0;
+    pthread_spin_lock(&self->tasks_lock);
+    ntt_task_list_push(&self->tasks_lists, task, &first);
+    if (first != 0) {
+        self->tasks_pending = 1;
+    }
+    pthread_spin_unlock(&self->tasks_lock);
+}
+
+void ntt_worker_wakeup(
+    ntt_worker_t* self)
+{
+    assert(self);
+
+    union sigval sigval;
+    sigval.sival_ptr = self;
+    int rc           = 0;
+    do {
+        rc = pthread_sigqueue(self->id, SIGRTNTTUP, sigval);
+    } while (rc == EAGAIN);
+    assert(rc == 0);
+}
+
+ntt_worker_t* ntt_worker_self() { return t_worker_self; }

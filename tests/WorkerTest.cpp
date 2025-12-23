@@ -1,3 +1,4 @@
+#include "ntt/worker.h"
 #include <ntt/ntt.hpp>
 
 #include <gtest/gtest.h>
@@ -56,7 +57,20 @@ public:
     void send(F&& f)
     {
         assert(m_worker != nullptr);
+        ntt_worker_send_task(m_worker, make_task(std::forward<F>(f)));
+    }
+
+    template <class F>
+    void post(F&& f)
+    {
+        assert(m_worker != nullptr);
         ntt_worker_post_task(m_worker, make_task(std::forward<F>(f)));
+    }
+
+    void wakeup()
+    {
+        assert(m_worker != nullptr);
+        ntt_worker_wakeup(m_worker);
     }
 
     static std::pair<std::jthread, ntt::worker> spawn()
@@ -191,6 +205,21 @@ TEST(NttWorkerTest, Send)
         for (std::size_t i = 0; i < g_expected_cnt; ++i) {
             worker.send([&cnt] { cnt += 1; });
         }
+    }
+    ASSERT_EQ(cnt, g_expected_cnt);
+}
+
+TEST(NttWorkerTest, PostWakeup)
+{
+    static constexpr std::size_t g_expected_cnt = 1'000'000;
+
+    std::size_t cnt = 0;
+    {
+        auto [_, worker] = ntt::worker::spawn();
+        for (std::size_t i = 0; i < g_expected_cnt; ++i) {
+            worker.post([&cnt] { cnt += 1; });
+        }
+        worker.wakeup();
     }
     ASSERT_EQ(cnt, g_expected_cnt);
 }

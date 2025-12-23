@@ -8,7 +8,7 @@ TEST(NttLoopTest, Common)
     bool started = false;
     ntt_loop_svc(
         ntt_loop_cbs_t {
-            .started = [](ntt_loop_t* loop, void* ctx) {
+            .on_start = [](ntt_loop_t* loop, void* ctx) {
                 (void)loop;
                 *static_cast<bool*>(ctx) = true;
             },
