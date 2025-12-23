@@ -1,8 +1,9 @@
 #include "ntt/sockaddr.h"
 
-#include "./sockaddr.h"
+#include "./sockaddr_impl.h"
 
 #include "ntt/char.h"
+#include "ntt/defs.h"
 #include "ntt/impl/malloc.h"
 #include "ntt/util.h"
 
@@ -17,14 +18,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-ntt_sockaddr_t* ntt_sockaddr_create_from_ipv4_and_port(const char* ipv4, uint16_t port)
+int ntt_sockaddr_init_from_ipv4_and_port(
+    ntt_sockaddr_t* self,
+    const char* ipv4,
+    uint16_t port)
 {
-    ntt_sockaddr_t* self = ntt_malloc(sizeof(struct ntt_sockaddr));
-
-    if (ntt_unlikely(self == NULL)) {
-        return NULL;
-    }
-
     struct sockaddr_in* sockaddr = (struct sockaddr_in*)&self->storage;
 
     sockaddr->sin_family = AF_INET;
@@ -33,6 +31,25 @@ ntt_sockaddr_t* ntt_sockaddr_create_from_ipv4_and_port(const char* ipv4, uint16_
     int rc = inet_pton(AF_INET, ipv4, &sockaddr->sin_addr);
 
     if (ntt_unlikely(rc != 1)) {
+        return -1;
+    }
+
+    return 0;
+}
+
+ntt_sockaddr_t* ntt_sockaddr_create_from_ipv4_and_port(
+    const char* ipv4,
+    uint16_t port)
+{
+    ntt_sockaddr_t* self = ntt_malloc(sizeof(struct ntt_sockaddr));
+
+    if (ntt_unlikely(self == NULL)) {
+        return NULL;
+    }
+
+    int rc = ntt_sockaddr_init_from_ipv4_and_port(self, ipv4, port);
+
+    if (ntt_unlikely(rc != 0)) {
         ntt_free(self);
         return NULL;
     }

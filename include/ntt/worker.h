@@ -12,9 +12,8 @@ typedef struct ntt_worker_cbs ntt_worker_cbs_t;
 
 struct ntt_worker_cbs {
     void (*enter_cb)(void* ctx, ntt_worker_t* worker);
+    void (*svc_cb)(void* ctx, ntt_sigset_t* sigset);
     void (*leave_cb)(void* cxt);
-    int (*svc_cb)(void* ctx, ntt_sigset_t* sigset);
-    void (*err_cb)(void* ctx, int rc);
 };
 
 NTT_EXPORT ntt_worker_t* ntt_worker_acquire(
@@ -24,7 +23,7 @@ NTT_EXPORT void ntt_worker_release(
     ntt_worker_t* self);
 
 NTT_EXPORT int ntt_worker_svc(
-    const ntt_worker_cbs_t* cbs,
+    ntt_worker_cbs_t cbs,
     void* ctx);
 
 NTT_EXPORT void ntt_worker_post_task(

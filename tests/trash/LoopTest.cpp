@@ -88,7 +88,7 @@ namespace ntt {
 
 class loop {
 public:
-    virtual void started() = 0;
+    virtual void on_started() = 0;
 
     virtual ~loop();
 
@@ -123,7 +123,7 @@ void loop::on_started(ntt_loop_t* l, void* ctx)
     auto& self = *static_cast<loop*>(ctx);
     self.m_loop = l;
     try {
-        self.started();
+        self.on_started();
     } catch (...) {
         // TODO(vgusev): exception handling
         abort();
@@ -146,7 +146,7 @@ TEST_F(LoopTest, NttLoop)
         {
         }
 
-        void started() override
+        void on_started() override
         {
             *m_started = true;
         }
@@ -195,7 +195,7 @@ TEST_F(LoopTest, Wakeup)
         {
         }
 
-        void started() override
+        void on_started() override
         {
             *m_started = true;
             add(*this);
@@ -262,7 +262,7 @@ TEST_F(LoopTest, SignalCatch)
         {
         }
 
-        void started() override
+        void on_started() override
         {
             add(*this);
         }

@@ -11,6 +11,7 @@
 #include "ntt/signal.h" // IWYU pragma: export
 #include "ntt/signal_source.h" // IWYU pragma: export
 #include "ntt/sockaddr.h" // IWYU pragma: export
+#include "ntt/socket.h" // IWYU pragma: export
 #include "ntt/task.h" // IWYU pragma: export
 #include "ntt/task_queue.h" // IWYU pragma: export
 #include "ntt/util.h" // IWYU pragma: export

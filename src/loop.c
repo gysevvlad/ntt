@@ -52,7 +52,7 @@ static void ntt_loop_worker_leave(void* ctx)
     // TODO: ...
 }
 
-static int ntt_loop_worker_svc(void* ctx, ntt_sigset_t* sigset)
+static void ntt_loop_worker_svc(void* ctx, ntt_sigset_t* sigset)
 {
     ntt_loop_t* self = ctx;
 
@@ -60,44 +60,37 @@ static int ntt_loop_worker_svc(void* ctx, ntt_sigset_t* sigset)
 
     int rc = 0;
 
-    do {
-        rc = epoll_pwait(
-            self->epoll_fd,
-            &event,
-            1,
-            -1,
-            (sigset_t*)sigset);
+repeat:
+    rc = epoll_pwait(
+        self->epoll_fd,
+        &event,
+        1,
+        -1,
+        (sigset_t*)sigset);
 
-        if ntt_likely (rc == 1) {
-            ntt_epoll_event_ready(&event);
-        }
-    } while (rc != -1);
+    if ntt_likely (rc <= 0) {
+        return;
+    }
 
-    return errno;
-}
-
-static void ntt_loop_worker_err(void* ctx, int rc)
-{
-    abort();
+    ntt_epoll_event_ready(&event);
+    goto repeat;
 }
 
 const static ntt_worker_cbs_t g_ntt_loop_follower_cbs = {
     .enter_cb = ntt_loop_follower_enter,
     .leave_cb = ntt_loop_worker_leave,
-    .svc_cb = ntt_loop_worker_svc,
-    .err_cb = ntt_loop_worker_err,
+    .svc_cb   = ntt_loop_worker_svc,
 };
 
 const static ntt_worker_cbs_t g_ntt_loop_leader_cbs = {
     .enter_cb = ntt_loop_leader_enter,
     .leave_cb = ntt_loop_worker_leave,
-    .svc_cb = ntt_loop_worker_svc,
-    .err_cb = ntt_loop_worker_err,
+    .svc_cb   = ntt_loop_worker_svc,
 };
 
 static void* ntt_loop_thread_svc(void* ctx)
 {
-    ntt_worker_svc(&g_ntt_loop_follower_cbs, ctx);
+    ntt_worker_svc(g_ntt_loop_follower_cbs, ctx);
     return NULL;
 }
 
@@ -127,13 +120,13 @@ int ntt_loop_svc(const ntt_loop_vptr_t* cbs, void* ctx, unsigned width)
         return -1;
     }
 
-    self->vptr = cbs;
-    self->ctx = ctx;
+    self->vptr     = cbs;
+    self->ctx      = ctx;
     self->epoll_fd = ntt_epoll_create1_or_abort(EPOLL_CLOEXEC);
     pthread_mutex_init(&self->mtx, NULL);
-    self->width = width;
+    self->width             = width;
     self->followers_created = 0;
-    self->followers_ready = 0;
+    self->followers_ready   = 0;
     pthread_cond_init(&self->cnd, NULL);
     self->work_cnt = 0;
 
@@ -143,11 +136,11 @@ int ntt_loop_svc(const ntt_loop_vptr_t* cbs, void* ctx, unsigned width)
         pthread_create(&self->workers[i].thread_id, NULL, ntt_loop_thread_svc, self);
     }
     self->workers[width - 1].thread_id = pthread_self();
-    self->followers_created = 1;
+    self->followers_created            = 1;
     pthread_cond_broadcast(&self->cnd);
     pthread_mutex_unlock(&self->mtx);
 
-    ntt_worker_svc(&g_ntt_loop_leader_cbs, self);
+    ntt_worker_svc(g_ntt_loop_leader_cbs, self);
 
     for (i = 0; i < width; ++i) {
         if (!pthread_equal(pthread_self(), self->workers[i].thread_id)) {
@@ -220,11 +213,11 @@ static void ntt_loop_barrier_dummy_call(void* ctx)
 static void ntt_loop_post_barrier_task(ntt_loop_t* self, ntt_task_t* task)
 {
     struct ntt_barrier_task* barrier = malloc(sizeof(struct ntt_barrier_task) + sizeof(ntt_task_node_t) * self->width);
-    barrier->task = task;
-    barrier->refs = self->width;
-    unsigned i = 0;
+    barrier->task                    = task;
+    barrier->refs                    = self->width;
+    unsigned i                       = 0;
     for (; i < self->width; ++i) {
-        ntt_task_t* nth_task = ntt_task_init(&barrier->task_nodes[i], ntt_loop_barrier_dummy_call, ntt_loop_barrier_task_svc);
+        ntt_task_t* nth_task                 = ntt_task_init(&barrier->task_nodes[i], ntt_loop_barrier_dummy_call, ntt_loop_barrier_task_svc);
         *(struct ntt_barrier_task**)nth_task = barrier;
         ntt_worker_post_task(self->workers[i].worker, nth_task);
     }
@@ -233,7 +226,7 @@ static void ntt_loop_post_barrier_task(ntt_loop_t* self, ntt_task_t* task)
 static void ntt_loop_epoll_event_canceled(void* payload)
 {
     ntt_epoll_event_t* self = *(ntt_epoll_event_t**)(payload);
-    ntt_loop_t* loop = self->loop;
+    ntt_loop_t* loop        = self->loop;
     ntt_epoll_event_cancelled(self);
     ntt_loop_work_leave(loop);
 }
@@ -241,10 +234,10 @@ static void ntt_loop_epoll_event_canceled(void* payload)
 int ntt_loop_add_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event)
 {
     struct epoll_event event;
-    event.data.ptr = epoll_event;
-    event.events = epoll_event->events;
+    event.data.ptr    = epoll_event;
+    event.events      = epoll_event->events;
     epoll_event->loop = self;
-    int rc = epoll_ctl(self->epoll_fd, EPOLL_CTL_ADD, epoll_event->fd, &event);
+    int rc            = epoll_ctl(self->epoll_fd, EPOLL_CTL_ADD, epoll_event->fd, &event);
     if (rc != 0) {
         return errno;
     }
@@ -258,7 +251,7 @@ int ntt_loop_del_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event)
     if (rc == -1) {
         return errno;
     }
-    ntt_task_t* task = ntt_make_task(ntt_loop_epoll_event_canceled, NULL);
+    ntt_task_t* task           = ntt_make_task(ntt_loop_epoll_event_canceled, NULL);
     *(ntt_epoll_event_t**)task = epoll_event;
     ntt_loop_post_barrier_task(self, task);
     return 0;

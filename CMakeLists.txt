@@ -21,8 +21,8 @@ set_target_properties(ntt
 include(GenerateExportHeader)
 generate_export_header(ntt EXPORT_FILE_NAME include/ntt/export.h)
 
-find_package(PkgConfig REQUIRED)
-pkg_search_module(CARES REQUIRED IMPORTED_TARGET libcares)
+# find_package(PkgConfig REQUIRED)
+# pkg_search_module(CARES REQUIRED IMPORTED_TARGET libcares)
 
 # ntt sources
 target_sources(ntt
@@ -30,24 +30,25 @@ target_sources(ntt
     # src/accept_source.c
     # src/connect_request.c
     # src/context.c
-    src/error.c
     # src/event_source.c
-    src/event.c
-    src/loop.c
-    src/malloc.c
     # src/pool.c
     # src/queue.c
-    src/reader.c
     # src/selector.c
     # src/session.c
-    src/signal.c
-    src/cstr.c
-    src/signal_source.c
-    src/sockaddr.c
-    src/task.c
     # src/task_cache.c
     # src/tcp_source.c
     # src/thread.c
+    src/cstr.c
+    src/error.c
+    src/event.c
+    src/loop.c
+    src/malloc.c
+    src/reader.c
+    src/signal.c
+    src/signal_source.c
+    src/sockaddr.c
+    src/socket.c
+    src/task.c
     src/util.c
     src/view.c
     src/worker.c
@@ -100,11 +101,12 @@ target_include_directories(ntt
 # links
 
 find_package(Threads REQUIRED)
-target_link_libraries(ntt PRIVATE Threads::Threads PkgConfig::CARES)
+target_link_libraries(ntt PRIVATE Threads::Threads)
 
 #[[ unit tests ]]#
 
 add_executable(ntt_unit_tests
+  tests/SocketTest.cpp
   tests/SockaddrTest.cpp
   tests/TaskTest.cpp
   tests/UtilTest.cpp
@@ -137,8 +139,8 @@ target_link_libraries(example-02 PRIVATE ntt::ntt)
 add_executable(example-03 example/example-03.c)
 target_link_libraries(example-03 PRIVATE ntt::ntt)
 
-add_executable(example-04 example/example-04.c)
-target_link_libraries(example-04 PRIVATE ntt::ntt)
+# add_executable(example-04 example/example-04.c)
+# target_link_libraries(example-04 PRIVATE ntt::ntt)
 
 #[[ ntt package ]]#
 # TODO: provide ntt package

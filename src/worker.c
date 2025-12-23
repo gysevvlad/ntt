@@ -20,21 +20,21 @@ static void ntt_process_nttup_signal_handler(int signum, siginfo_t* info, void* 
     (void)context;
 
     ntt_worker_t* worker = info->si_value.sival_ptr;
-    worker->tasks_up = 1;
+    worker->tasks_up     = 1;
 }
 
 static void ntt_process_setup_signal_action()
 {
     struct sigaction action = { 0 };
-    action.sa_flags = SA_SIGINFO;
-    action.sa_sigaction = ntt_process_nttup_signal_handler;
-    int rc = sigaction(SIGRTNTTUP, &action, NULL);
+    action.sa_flags         = SA_SIGINFO;
+    action.sa_sigaction     = ntt_process_nttup_signal_handler;
+    int rc                  = sigaction(SIGRTNTTUP, &action, NULL);
 }
 
 static void ntt_worker_stop_task_svc(ntt_task_t* task)
 {
     ntt_worker_t* self = *(ntt_worker_t**)task;
-    self->stopped = 1;
+    self->stopped      = 1;
 }
 
 static void ntt_worker_stop_task_free(ntt_task_t* task)
@@ -58,7 +58,7 @@ static void ntt_worker_drain_tasks(ntt_worker_t* self)
 
 void ntt_worker_construct(
     ntt_worker_t* self,
-    const ntt_worker_cbs_t* cbs,
+    ntt_worker_cbs_t cbs,
     void* ctx)
 {
     self->refs = 1;
@@ -88,24 +88,27 @@ void ntt_worker_destruct(
 ntt_worker_t* ntt_worker_acquire(
     ntt_worker_t* self)
 {
-    size_t prev = atomic_fetch_add(&self->refs, 1);
-    assert(prev != 0 && "[ntt_worker_acquire]: trying to acquire already released object");
+    if (self != NULL) {
+        size_t prev = atomic_fetch_add(&self->refs, 1);
+        assert(prev != 0 && "[ntt_worker_acquire]: trying to acquire already released object");
+    }
     return self;
 }
 
 void ntt_worker_release(
     ntt_worker_t* self)
 {
-    size_t prev = atomic_fetch_sub(&self->refs, 1);
-    assert(prev != -1 && "[ntt_worker_release]: trying to release already released object");
-
-    if (prev == 1) {
-        ntt_worker_post_task(self, &self->stop_task_node.payload);
+    if (self != NULL) {
+        size_t prev = atomic_fetch_sub(&self->refs, 1);
+        assert(prev != -1 && "[ntt_worker_release]: trying to release already released object");
+        if (prev == 1) {
+            ntt_worker_post_task(self, &self->stop_task_node.payload);
+        }
     }
 }
 
 int ntt_worker_svc(
-    const ntt_worker_cbs_t* cbs,
+    ntt_worker_cbs_t cbs,
     void* ctx)
 {
     ntt_worker_t worker;
@@ -123,43 +126,18 @@ int ntt_worker_svc(
 
     pthread_sigmask(SIG_BLOCK, &nttup, (sigset_t*)&sigset.data);
 
-    worker.cbs->enter_cb(worker.ctx, &worker);
-
-    if (worker.cbs->svc_cb) {
-        while (!worker.stopped) {
-            int rc = worker.cbs->svc_cb(worker.ctx, &sigset);
-            if (rc) {
-                if (rc == EINTR) {
-                    if (worker.tasks_up) {
-                        ntt_worker_drain_tasks(&worker);
-                        worker.tasks_up = 0;
-                    }
-                    continue;
-                }
-                if (worker.cbs->err_cb) {
-                    worker.cbs->err_cb(worker.ctx, rc);
-                }
-                result = rc;
-                break;
-            }
-        }
-    }
+    worker.cbs.enter_cb(worker.ctx, &worker);
+    ntt_worker_release(&worker);
 
     while (!worker.stopped) {
-        int signum = 0;
-        int rc = sigwait(&nttup, &signum);
-        if (rc != 0) {
-            abort();
-        }
-        if (signum == SIGRTNTTUP) {
+        worker.cbs.svc_cb(worker.ctx, &sigset);
+        if (worker.tasks_up) {
             ntt_worker_drain_tasks(&worker);
+            worker.tasks_up = 0;
         }
-        signum = 0;
     }
 
-    if (worker.cbs->leave_cb) {
-        worker.cbs->leave_cb(worker.ctx);
-    }
+    worker.cbs.leave_cb(worker.ctx);
 
     ntt_worker_destruct(&worker);
 
@@ -179,7 +157,7 @@ void ntt_worker_post_task(
     if (first) {
         union sigval sigval;
         sigval.sival_ptr = self;
-        int rc = 0;
+        int rc           = 0;
         do {
             rc = pthread_sigqueue(self->id, SIGRTNTTUP, sigval);
         } while (rc == EAGAIN);

@@ -1,4 +1,3 @@
-#include "ntt/sockaddr.h"
 #include "ntt/ntt.hpp"
 
 #include <boost/asio.hpp>

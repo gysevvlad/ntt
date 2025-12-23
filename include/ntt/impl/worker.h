@@ -7,18 +7,19 @@
 #include "ntt/impl/task_list.h"
 
 #include <pthread.h>
+#include <signal.h>
 
 EXTERN_START
 
 struct ntt_worker {
     atomic_size_t refs;
 
-    const ntt_worker_cbs_t* cbs;
+    ntt_worker_cbs_t cbs;
     void* ctx;
 
     pthread_t id;
 
-    int tasks_up;
+    volatile sig_atomic_t tasks_up;
     pthread_spinlock_t tasks_lock;
     ntt_task_list_t tasks_lists;
 
@@ -29,7 +30,7 @@ struct ntt_worker {
 
 void ntt_worker_construct(
     ntt_worker_t* self,
-    const ntt_worker_cbs_t* cbs,
+    ntt_worker_cbs_t cbs,
     void* ctx);
 
 void ntt_worker_destruct(
