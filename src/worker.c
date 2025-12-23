@@ -7,6 +7,7 @@
 #include "ntt/impl/worker.h"
 
 #include <assert.h>
+#include <bits/types/sigset_t.h>
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
@@ -107,8 +108,9 @@ void ntt_worker_release(
     }
 }
 
-int ntt_worker_svc(
+NTT_EXPORT int ntt_worker_svc_with_mask(
     ntt_worker_cbs_t cbs,
+    ntt_sigset_t origin_mask,
     void* ctx)
 {
     ntt_worker_t worker;
@@ -122,15 +124,20 @@ int ntt_worker_svc(
     sigemptyset(&nttup);
     sigaddset(&nttup, SIGRTNTTUP);
 
-    ntt_sigset_t sigset;
+    pthread_sigmask(SIG_BLOCK, &nttup, NULL);
 
-    pthread_sigmask(SIG_BLOCK, &nttup, (sigset_t*)&sigset.data);
+    // int signal = 1;
+    // for (; signal < NSIG; ++signal) {
+    //     if (sigismember((sigset_t*)signal_mask.data, signal)) {
+    //         printf("Signal %i is blocked\n", signal);
+    //     }
+    // }
 
     worker.cbs.enter_cb(worker.ctx, &worker);
     ntt_worker_release(&worker);
 
     while (!worker.stopped) {
-        worker.cbs.svc_cb(worker.ctx, &sigset);
+        worker.cbs.svc_cb(worker.ctx, &origin_mask);
         if (worker.tasks_up) {
             ntt_worker_drain_tasks(&worker);
             worker.tasks_up = 0;
@@ -144,6 +151,15 @@ int ntt_worker_svc(
     pthread_sigmask(SIG_UNBLOCK, &nttup, NULL);
 
     return result;
+}
+
+int ntt_worker_svc(
+    ntt_worker_cbs_t cbs,
+    void* ctx)
+{
+    ntt_sigset_t origin_mask;
+    pthread_sigmask(SIG_SETMASK, NULL, (sigset_t*)origin_mask.data);
+    return ntt_worker_svc_with_mask(cbs, origin_mask, ctx);
 }
 
 void ntt_worker_post_task(

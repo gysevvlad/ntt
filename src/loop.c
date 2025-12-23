@@ -5,16 +5,20 @@
 #include "ntt/task.h"
 #include "ntt/worker.h"
 
+#include <bits/types/sigset_t.h>
 #include <errno.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdatomic.h>
+#include <stdio.h>
+#include <string.h>
 #include <sys/epoll.h>
 
 static void ntt_loop_leader_enter(void* ctx, ntt_worker_t* worker)
 {
     ntt_loop_t* self = ctx;
 
-    self->workers[self->width - 1].worker = worker;
+    self->workers[self->width - 1].worker = ntt_worker_acquire(worker);
 
     pthread_mutex_lock(&self->mtx);
     while (self->followers_ready < self->width - 1) {
@@ -23,7 +27,7 @@ static void ntt_loop_leader_enter(void* ctx, ntt_worker_t* worker)
     pthread_mutex_unlock(&self->mtx);
 
     self->work_cnt = 1;
-    self->vptr.started(self, self->ctx);
+    self->cbs.started(self, self->ctx);
     ntt_loop_work_leave(self);
 }
 
@@ -39,7 +43,7 @@ static void ntt_loop_follower_enter(void* ctx, ntt_worker_t* worker)
     unsigned i = 0;
     for (; i < self->width - 1; ++i) {
         if (pthread_equal(pthread_self(), self->workers[i].thread_id)) {
-            self->workers[i].worker = worker;
+            self->workers[i].worker = ntt_worker_acquire(worker);
         }
     }
     self->followers_ready += 1;
@@ -76,6 +80,42 @@ repeat:
     goto repeat;
 }
 
+static void ntt_loop_leader_worker_svc(void* ctx, ntt_sigset_t* sigset)
+{
+    ntt_loop_t* self = ctx;
+
+    struct epoll_event event;
+
+    int rc = 0;
+
+repeat:
+    rc = epoll_pwait(
+        self->epoll_fd,
+        &event,
+        1,
+        -1,
+        (sigset_t*)sigset);
+
+    if ntt_likely (rc <= 0) {
+        if (self->got_sighup != 0) {
+            self->got_sighup = 0;
+            self->cbs.on_signal(self, self->ctx, SIGHUP);
+        }
+        if (self->got_sigint != 0) {
+            self->got_sigint = 0;
+            self->cbs.on_signal(self, self->ctx, SIGINT);
+        }
+        if (self->got_sigterm != 0) {
+            self->got_sigterm = 0;
+            self->cbs.on_signal(self, self->ctx, SIGTERM);
+        }
+        return;
+    }
+
+    ntt_epoll_event_ready(&event);
+    goto repeat;
+}
+
 const static ntt_worker_cbs_t g_ntt_loop_follower_cbs = {
     .enter_cb = ntt_loop_follower_enter,
     .leave_cb = ntt_loop_worker_leave,
@@ -85,7 +125,7 @@ const static ntt_worker_cbs_t g_ntt_loop_follower_cbs = {
 const static ntt_worker_cbs_t g_ntt_loop_leader_cbs = {
     .enter_cb = ntt_loop_leader_enter,
     .leave_cb = ntt_loop_worker_leave,
-    .svc_cb   = ntt_loop_worker_svc,
+    .svc_cb   = ntt_loop_leader_worker_svc,
 };
 
 static void* ntt_loop_thread_svc(void* ctx)
@@ -103,6 +143,25 @@ static int ntt_epoll_create1_or_abort(int flags)
     return fd;
 }
 
+static ntt_loop_t* g_main_loop = NULL;
+
+void ntt_handle_signal(int sig)
+{
+    switch (sig) {
+    case SIGTERM:
+        g_main_loop->got_sigterm = 1;
+        break;
+    case SIGINT:
+        g_main_loop->got_sigint = 1;
+        break;
+    case SIGHUP:
+        g_main_loop->got_sighup = 1;
+        break;
+    default:
+        break;
+    }
+}
+
 int ntt_loop_svc(ntt_loop_cbs_t cbs, void* ctx, unsigned width)
 {
     if (width == 0) {
@@ -117,15 +176,41 @@ int ntt_loop_svc(ntt_loop_cbs_t cbs, void* ctx, unsigned width)
         return -1;
     }
 
-    self->vptr     = cbs;
+    self->cbs      = cbs;
     self->ctx      = ctx;
     self->epoll_fd = ntt_epoll_create1_or_abort(EPOLL_CLOEXEC);
     pthread_mutex_init(&self->mtx, NULL);
     self->width             = width;
     self->followers_created = 0;
     self->followers_ready   = 0;
+    self->got_sigint        = 0;
+    self->got_sighup        = 0;
+    self->got_sigterm       = 0;
     pthread_cond_init(&self->cnd, NULL);
     self->work_cnt = 0;
+
+    sigset_t block;
+    sigemptyset(&block);
+    sigaddset(&block, SIGINT);
+    sigaddset(&block, SIGTERM);
+    sigaddset(&block, SIGHUP);
+
+    ntt_sigset_t origin_mask;
+    sigemptyset((sigset_t*)origin_mask.data);
+
+    // Block signals and save origin_mask
+    pthread_sigmask(SIG_BLOCK, &block, (sigset_t*)origin_mask.data);
+
+    g_main_loop = self;
+
+    struct sigaction sa = { 0 };
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags   = SA_RESTART;
+    sa.sa_handler = ntt_handle_signal;
+
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGHUP, &sa, NULL);
 
     pthread_mutex_lock(&self->mtx);
     unsigned i = 0;
@@ -137,7 +222,7 @@ int ntt_loop_svc(ntt_loop_cbs_t cbs, void* ctx, unsigned width)
     pthread_cond_broadcast(&self->cnd);
     pthread_mutex_unlock(&self->mtx);
 
-    ntt_worker_svc(g_ntt_loop_leader_cbs, self);
+    ntt_worker_svc_with_mask(g_ntt_loop_leader_cbs, origin_mask, self);
 
     for (i = 0; i < width; ++i) {
         if (!pthread_equal(pthread_self(), self->workers[i].thread_id)) {
@@ -162,6 +247,21 @@ void ntt_loop_destroy(ntt_loop_t* self)
     // self->followers_ready = 0;
     pthread_cond_destroy(&self->cnd);
     // self->active = 0;
+}
+
+ntt_loop_t* ntt_loop_acquire(ntt_loop_t* self)
+{
+    if (self != NULL) {
+        ntt_loop_work_enter(self);
+    }
+    return self;
+}
+
+void ntt_loop_release(ntt_loop_t* self)
+{
+    if (self != NULL) {
+        ntt_loop_work_leave(self);
+    }
 }
 
 void ntt_loop_work_enter(ntt_loop_t* self)

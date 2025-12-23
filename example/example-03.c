@@ -1,4 +1,5 @@
 #include "ntt/event.h"
+#include "ntt/reader.h"
 #include "ntt/signal_source.h"
 #include <asm-generic/errno-base.h>
 #include <asm-generic/errno.h>
@@ -12,6 +13,7 @@
 #include <unistd.h>
 
 typedef struct app {
+    int stopped;
     ntt_reader_t* stdin_reader;
 } app_t;
 
@@ -33,14 +35,13 @@ static const ntt_reader_vtbl_t g_stdin_reader = {
 
 void app_init(app_t* self)
 {
+    self->stopped      = 0;
     self->stdin_reader = ntt_reader_create(&g_stdin_reader, self);
 }
 
-static app_t* app_from_ctx(void* ctx) { return ctx; }
-
-void ntt_loop_started(ntt_loop_t* loop, void* ctx)
+void app_on_start(ntt_loop_t* loop, void* ctx)
 {
-    app_t* app = app_from_ctx(ctx);
+    app_t* app = ctx;
 
     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     if (fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK) == -1) {
@@ -51,10 +52,33 @@ void ntt_loop_started(ntt_loop_t* loop, void* ctx)
     ntt_reader_start(app->stdin_reader, STDIN_FILENO, loop);
 }
 
+void app_deinit(app_t* self)
+{
+    self->stopped = 0;
+    ntt_reader_delete(self->stdin_reader);
+    self->stdin_reader = NULL;
+}
+
+void app_on_signal(ntt_loop_t* loop, void* ctx, int signal)
+{
+    app_t* self = ctx;
+
+    if (self->stopped == 0) {
+        self->stopped = 1;
+        ntt_reader_cancel(self->stdin_reader);
+    }
+}
+
 int main(int argc, char* argv[])
 {
     app_t app;
     app_init(&app);
-    ntt_loop_svc(ntt_loop_cbs_make(ntt_loop_started), &app, 4);
+    ntt_loop_svc(
+        ntt_loop_cbs_make(
+            app_on_start,
+            app_on_signal),
+        &app, 4);
+    app_deinit(&app);
+    printf("done\n");
     return 0;
 }

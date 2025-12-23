@@ -12,35 +12,21 @@
 #include <unistd.h>
 
 typedef struct app {
-    ntt_signal_source_t* signal_source;
+    int stopped;
     ntt_event_t* stdin_event;
 } app_t;
 
-static app_t* app_from_ctx(void* ctx) { return ctx; }
-
-static void app_signal_raised(ntt_signal_source_t* signal_source, void* ctx, int signal)
+void app_init(app_t* self)
 {
-    app_t* app = app_from_ctx(ctx);
+    self->stopped     = 0;
+    self->stdin_event = NULL;
+}
 
-    if (signal == SIGINT) {
-        printf("got SIGINT\n");
-    } else {
-        printf("got signal %i\n", signal);
-    }
-
+static void app_on_signal(ntt_loop_t* loop, void* ctx, int signal)
+{
+    app_t* app = ctx;
     ntt_event_cancel(app->stdin_event);
-    ntt_signal_source_stop(signal_source);
 }
-
-static void app_signal_listener_stopped(ntt_signal_source_t* signal_source, void* ctx)
-{
-}
-
-static const ntt_signal_listener_vtbl_t g_app_signal_source_vtbl = {
-    .name    = "signal-listener",
-    .raised  = app_signal_raised,
-    .stopped = app_signal_listener_stopped,
-};
 
 void ntt_stdin_reader_svc(ntt_event_t* self, void* ctx, ntt_interest_t interest)
 {
@@ -78,9 +64,9 @@ static const ntt_event_vtbl_t g_stdin_reader = {
     .ntt_event_stopped_cb = ntt_stdin_reader_stopped,
 };
 
-void ntt_loop_started(ntt_loop_t* loop, void* ctx)
+void app_on_start(ntt_loop_t* loop, void* ctx)
 {
-    app_t* app = app_from_ctx(ctx);
+    app_t* app = ctx;
 
     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     if (fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK) == -1) {
@@ -90,19 +76,17 @@ void ntt_loop_started(ntt_loop_t* loop, void* ctx)
 
     app->stdin_event = ntt_event_create(&g_stdin_reader, app, NTT_INTEREST_READABLE);
     ntt_event_start(app->stdin_event, STDIN_FILENO, loop);
-
-    ntt_signal_source_start(app_from_ctx(ctx)->signal_source, loop);
-    printf("waiting signal...\n");
 }
 
 int main(int argc, char* argv[])
 {
-    ntt_signal_setup(SIGINT);
     app_t app;
-    app.signal_source = ntt_signal_source_create(&g_app_signal_source_vtbl, &app, SIGINT);
-    ntt_loop_svc(ntt_loop_cbs_make(ntt_loop_started), &app, 4);
-    ntt_signal_source_destroy(app.signal_source);
+    app_init(&app);
+    ntt_loop_svc(
+        ntt_loop_cbs_make(
+            app_on_start,
+            app_on_signal),
+        &app, 4);
     printf("app stopped\n");
-    ntt_signal_revert(SIGTERM);
     return 0;
 }

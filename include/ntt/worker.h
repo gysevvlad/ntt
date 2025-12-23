@@ -26,6 +26,11 @@ NTT_EXPORT int ntt_worker_svc(
     ntt_worker_cbs_t cbs,
     void* ctx);
 
+NTT_EXPORT int ntt_worker_svc_with_mask(
+    ntt_worker_cbs_t cbs,
+    ntt_sigset_t origin_mask,
+    void* ctx);
+
 NTT_EXPORT void ntt_worker_post_task(
     ntt_worker_t* self,
     ntt_task_t* task);

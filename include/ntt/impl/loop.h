@@ -3,9 +3,11 @@
 #include "ntt/defs.h"
 #include "ntt/impl/atomic.h"
 #include "ntt/impl/epoll_event.h"
+#include "ntt/sigset.h"
 #include <ntt/loop.h>
 
 #include <pthread.h>
+#include <signal.h>
 #include <stdatomic.h>
 
 EXTERN_START
@@ -18,11 +20,14 @@ typedef struct ntt_loop_thread_ctx {
 } ntt_loop_thread_ctx_t;
 
 struct ntt_loop {
-    ntt_loop_cbs_t vptr;
+    ntt_loop_cbs_t cbs;
     void* ctx;
     int epoll_fd;
     int followers_created;
     unsigned followers_ready;
+    volatile sig_atomic_t got_sigint;
+    volatile sig_atomic_t got_sighup;
+    volatile sig_atomic_t got_sigterm;
     atomic_size_t work_cnt;
     pthread_mutex_t mtx;
     pthread_cond_t cnd;
