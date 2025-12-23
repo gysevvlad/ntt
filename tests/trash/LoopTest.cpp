@@ -24,7 +24,7 @@ TEST_F(LoopTest, NothingTodoTask)
     // just start/stop test
 
     bool started = false;
-    static ntt_loop_vptr_t g_loop_vptr {
+    static ntt_loop_cbs_t g_loop_vptr {
         .name = "test_loop",
         .started = []([[maybe_unused]] ntt_loop_t* loop, void* ctx) {
             *static_cast<bool*>(ctx) = true;
@@ -113,7 +113,7 @@ private:
     ntt_loop_t* m_loop { nullptr };
 
     static void on_started(ntt_loop_t* l, void* ctx);
-    const static ntt_loop_vptr_t vtbl;
+    const static ntt_loop_cbs_t vtbl;
 };
 
 loop::~loop() = default;
@@ -130,7 +130,7 @@ void loop::on_started(ntt_loop_t* l, void* ctx)
     }
 }
 
-const ntt_loop_vptr_t loop::vtbl {
+const ntt_loop_cbs_t loop::vtbl {
     .name = "ntt::loop",
     .started = loop::on_started,
 };

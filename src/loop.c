@@ -23,7 +23,7 @@ static void ntt_loop_leader_enter(void* ctx, ntt_worker_t* worker)
     pthread_mutex_unlock(&self->mtx);
 
     self->work_cnt = 1;
-    self->vptr->started(self, self->ctx);
+    self->vptr.started(self, self->ctx);
     ntt_loop_work_leave(self);
 }
 
@@ -103,11 +103,8 @@ static int ntt_epoll_create1_or_abort(int flags)
     return fd;
 }
 
-int ntt_loop_svc(const ntt_loop_vptr_t* cbs, void* ctx, unsigned width)
+int ntt_loop_svc(ntt_loop_cbs_t cbs, void* ctx, unsigned width)
 {
-    if (cbs == NULL) {
-        return -1;
-    }
     if (width == 0) {
         return -1;
     }

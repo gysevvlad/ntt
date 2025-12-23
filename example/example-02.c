@@ -95,17 +95,12 @@ void ntt_loop_started(ntt_loop_t* loop, void* ctx)
     printf("waiting signal...\n");
 }
 
-static const ntt_loop_vptr_t loop_vtbl = {
-    .name    = "example-02",
-    .started = ntt_loop_started,
-};
-
 int main(int argc, char* argv[])
 {
     ntt_signal_setup(SIGINT);
     app_t app;
     app.signal_source = ntt_signal_source_create(&g_app_signal_source_vtbl, &app, SIGINT);
-    ntt_loop_svc(&loop_vtbl, &app, 4);
+    ntt_loop_svc(ntt_loop_cbs_make(ntt_loop_started), &app, 4);
     ntt_signal_source_destroy(app.signal_source);
     printf("app stopped\n");
     ntt_signal_revert(SIGTERM);

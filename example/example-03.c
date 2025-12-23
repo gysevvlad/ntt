@@ -51,15 +51,10 @@ void ntt_loop_started(ntt_loop_t* loop, void* ctx)
     ntt_reader_start(app->stdin_reader, STDIN_FILENO, loop);
 }
 
-static const ntt_loop_vptr_t loop_vtbl = {
-    .name    = "example-03",
-    .started = ntt_loop_started,
-};
-
 int main(int argc, char* argv[])
 {
     app_t app;
     app_init(&app);
-    ntt_loop_svc(&loop_vtbl, &app, 4);
+    ntt_loop_svc(ntt_loop_cbs_make(ntt_loop_started), &app, 4);
     return 0;
 }

@@ -18,7 +18,7 @@ typedef struct ntt_loop_thread_ctx {
 } ntt_loop_thread_ctx_t;
 
 struct ntt_loop {
-    const ntt_loop_vptr_t* vptr;
+    ntt_loop_cbs_t vptr;
     void* ctx;
     int epoll_fd;
     int followers_created;

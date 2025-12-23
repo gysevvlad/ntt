@@ -27,7 +27,14 @@ public:
     static void svc(Args&&... args)
     {
         Impl impl { std::forward<Args>(args)... };
-        ntt_loop_svc(&vtbl, static_cast<loop*>(&impl), 4);
+        ntt_loop_svc(
+            ntt_loop_cbs_t {
+                .started = [](ntt_loop_t* loop, void* ctx) {
+                    (void)loop;
+                    static_cast<ntt::loop*>(ctx)->on_started();
+                },
+            },
+            static_cast<loop*>(&impl), 4);
     }
 
 private:
@@ -40,7 +47,7 @@ private:
     ntt_loop_t* m_loop { nullptr };
 
     static void on_started(ntt_loop_t* l, void* ctx);
-    const static ntt_loop_vptr_t vtbl;
+    const static ntt_loop_cbs_t vtbl;
 };
 
 loop::~loop() = default;
@@ -56,11 +63,6 @@ void loop::on_started(ntt_loop_t* loop, void* ctx)
         abort();
     }
 }
-
-const ntt_loop_vptr_t loop::vtbl {
-    .name    = "ntt::loop",
-    .started = loop::on_started,
-};
 
 } // namespace ntt
 
@@ -115,7 +117,7 @@ TEST_F(SocketTest, BaseTest)
 TEST_F(SocketTest, CheckAccept)
 {
     boost::asio::io_context context;
-    boost::asio::ip::tcp::socket sock{context};
+    boost::asio::ip::tcp::socket sock { context };
     boost::asio::ip::tcp::endpoint endpoint;
     sock.connect(endpoint);
 }

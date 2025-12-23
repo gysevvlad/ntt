@@ -106,8 +106,9 @@ target_link_libraries(ntt PRIVATE Threads::Threads)
 #[[ unit tests ]]#
 
 add_executable(ntt_unit_tests
-  tests/SocketTest.cpp
+  tests/LoopTest.cpp
   tests/SockaddrTest.cpp
+  tests/SocketTest.cpp
   tests/TaskTest.cpp
   tests/UtilTest.cpp
   tests/WorkerTest.cpp
