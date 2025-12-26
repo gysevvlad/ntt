@@ -15,11 +15,10 @@ static inline void ntt_task_list_init(ntt_task_list_t* self)
     ntt_list_init(&self->list);
 }
 
-static inline void ntt_task_list_push(ntt_task_list_t* self, ntt_task_t* task,
-    int* first)
+static inline void ntt_task_list_push(ntt_task_list_t* self, ntt_task_t* task)
 {
     ntt_task_node_t* task_node = ntt_container_of(task, ntt_task_node_t, payload);
-    ntt_list_push_back(&self->list, &task_node->node, first);
+    ntt_list_push_back(&self->list, &task_node->node);
 }
 
 static inline ntt_task_t* ntt_task_list_front(ntt_task_list_t* self)

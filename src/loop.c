@@ -316,7 +316,7 @@ static void ntt_loop_post_barrier_task(ntt_loop_t* self, ntt_task_t* task)
     for (; i < self->width; ++i) {
         ntt_task_t* nth_task                 = ntt_task_init(&barrier->task_nodes[i], ntt_loop_barrier_dummy_call, ntt_loop_barrier_task_svc);
         *(struct ntt_barrier_task**)nth_task = barrier;
-        ntt_worker_send_task(self->workers[i].worker, nth_task);
+        ntt_worker_push_task(self->workers[i].worker, nth_task);
     }
 }
 

@@ -42,6 +42,7 @@ target_sources(ntt
     src/error.c
     src/event.c
     src/loop.c
+    src/log.c
     src/malloc.c
     src/reader.c
     src/signal.c
@@ -52,6 +53,7 @@ target_sources(ntt
     src/util.c
     src/view.c
     src/worker.c
+    src/worker_task_queue.c
   PRIVATE
     # FILE_SET ntt_impl_headers
     # TYPE HEADERS
@@ -65,6 +67,7 @@ target_sources(ntt
       include/ntt/impl/table.h
       include/ntt/impl/tcp_source.h
       include/ntt/impl/worker.h
+      include/ntt/impl/worker_task_queue.h
     # BASE_DIRS
     #   include
   # PUBLIC
@@ -76,6 +79,7 @@ target_sources(ntt
       include/ntt/connect_request.h
       include/ntt/defs.h
       include/ntt/cstr.h
+      include/ntt/log.h
       include/ntt/event_source.h
       include/ntt/reader.h
       include/ntt/session.h

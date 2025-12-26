@@ -3,6 +3,8 @@
 #include "ntt/defs.h"
 #include "ntt/export.h"
 
+#include <stdint.h>
+
 EXTERN_START
 
 /**

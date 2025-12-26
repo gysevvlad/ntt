@@ -31,23 +31,26 @@ NTT_EXPORT int ntt_worker_svc_with_mask(
     ntt_sigset_t origin_mask,
     void* ctx);
 
-NTT_EXPORT void ntt_worker_send_task(
+NTT_EXPORT ntt_worker_t* ntt_worker_self();
+
+NTT_EXPORT void ntt_worker_push_task(
     ntt_worker_t* self,
     ntt_task_t* task);
 
-/**
- * Add task to worker task queue without nitification.
- */
-NTT_EXPORT void ntt_worker_post_task(
+NTT_EXPORT void ntt_worker_push_task_no_wakeup(
     ntt_worker_t* self,
     ntt_task_t* task);
 
-/**
- * Wakeup worker to drain task queue.
- */
+NTT_EXPORT void ntt_worker_push_task_defer_wakeup(
+    ntt_worker_t* self,
+    ntt_worker_t* sender,
+    ntt_task_t* task);
+
 NTT_EXPORT void ntt_worker_wakeup(
     ntt_worker_t* self);
 
-NTT_EXPORT ntt_worker_t* ntt_worker_self();
+NTT_EXPORT void ntt_worker_defer_wakeup(
+    ntt_worker_t* self,
+    ntt_worker_t* sender);
 
 EXTERN_STOP

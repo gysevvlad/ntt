@@ -1,5 +1,8 @@
 #include "ntt/worker.h"
 
+#include "ntt/impl/task.h"
+#include "ntt/impl/worker_task_queue.h"
+#include "ntt/log.h"
 #include "ntt/sigset.h"
 
 #include "ntt/impl/atomic.h"
@@ -11,6 +14,8 @@
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <threads.h>
 
@@ -18,13 +23,34 @@
 
 static thread_local ntt_worker_t* t_worker_self = NULL;
 
+static atomic_size_t g_worker_next_key = 1;
+static atomic_size_t g_thread_next_key = 1;
+
+static thread_local size_t g_thread_key = 0;
+
+size_t ntt_this_thread_key()
+{
+    if (g_thread_key == 0) {
+        g_thread_key = atomic_fetch_add(&g_thread_next_key, 1);
+    }
+    return g_thread_key;
+}
+
+size_t ntt_this_worker_key()
+{
+    if (t_worker_self != NULL) {
+        return t_worker_self->key;
+    }
+    return 0;
+}
+
 static void ntt_process_nttup_signal_handler(int signum, siginfo_t* info, void* context)
 {
     (void)signum;
     (void)context;
 
-    ntt_worker_t* worker = info->si_value.sival_ptr;
-    worker->tasks_up     = 1;
+    ntt_worker_t* worker  = info->si_value.sival_ptr;
+    worker->task_queue.up = 1;
 }
 
 static void ntt_process_setup_signal_action()
@@ -46,36 +72,17 @@ static void ntt_worker_stop_task_free(ntt_task_t* task)
     // do nothing
 }
 
-static void ntt_worker_drain_tasks(ntt_worker_t* self)
-{
-    int last = 0;
-    do {
-        ntt_task_t* task = ntt_task_list_front(&self->tasks_lists);
-        assert(task != NULL);
-        ntt_do_task_inl(task);
-        pthread_spin_lock(&self->tasks_lock);
-        ntt_task_list_pop(&self->tasks_lists, &last);
-        pthread_spin_unlock(&self->tasks_lock);
-        ntt_free_task_inl(task);
-    } while (!last);
-}
-
 void ntt_worker_init(
     ntt_worker_t* self,
     ntt_worker_cbs_t cbs,
     void* ctx)
 {
     self->refs = 1;
-
-    self->cbs = cbs;
-    self->ctx = ctx;
-
-    self->tasks_up = 0;
-    pthread_spin_init(&self->tasks_lock, 0);
-    ntt_task_list_init(&self->tasks_lists);
-    self->tasks_pending = 0;
-    // self->wakeup_gen = 0;
-    // self->task_gen = 0;
+    self->cbs  = cbs;
+    self->ctx  = ctx;
+    self->id   = pthread_self();
+    self->key  = atomic_fetch_add(&g_worker_next_key, 1);
+    ntt_worker_task_queue_init_impl(&self->task_queue, self);
 
     ntt_task_t* task = ntt_task_init(
         &self->stop_task_node,
@@ -89,7 +96,7 @@ void ntt_worker_init(
 void ntt_worker_deinit(
     ntt_worker_t* self)
 {
-    pthread_spin_destroy(&self->tasks_lock);
+    // TODO(vg): ...
 }
 
 ntt_worker_t* ntt_worker_acquire(
@@ -109,7 +116,7 @@ void ntt_worker_release(
         size_t prev = atomic_fetch_sub(&self->refs, 1);
         assert(prev != -1 && "[ntt_worker_release]: trying to release already released object");
         if (prev == 1) {
-            ntt_worker_send_task(self, &self->stop_task_node.payload);
+            ntt_worker_push_task(self, &self->stop_task_node.payload);
         }
     }
 }
@@ -132,24 +139,20 @@ NTT_EXPORT int ntt_worker_svc_with_mask(
 
     pthread_sigmask(SIG_BLOCK, &nttup, NULL);
 
-    // int signal = 1;
-    // for (; signal < NSIG; ++signal) {
-    //     if (sigismember((sigset_t*)signal_mask.data, signal)) {
-    //         printf("Signal %i is blocked\n", signal);
-    //     }
-    // }
+    t_worker_self = &worker;
 
     worker.cbs.enter_cb(worker.ctx, &worker);
     ntt_worker_release(&worker);
 
     while (!worker.stopped) {
+        ntt_log("[t:%ld|w:%ld] run svc callback\n", ntt_this_thread_key(), ntt_this_worker_key());
         worker.cbs.svc_cb(worker.ctx, &origin_mask);
-        if (worker.tasks_up) {
-            ntt_worker_drain_tasks(&worker);
-            worker.tasks_up = 0;
+        if (worker.task_queue.up) {
+            ntt_worker_task_queue_svc_impl(&worker.task_queue);
+            worker.task_queue.up = 0;
         }
     }
-
+    t_worker_self = NULL;
     worker.cbs.leave_cb(worker.ctx);
 
     ntt_worker_deinit(&worker);
@@ -168,50 +171,77 @@ int ntt_worker_svc(
     return ntt_worker_svc_with_mask(cbs, origin_mask, ctx);
 }
 
-void ntt_worker_send_task(
+void ntt_worker_push_task(
     ntt_worker_t* self,
     ntt_task_t* task)
 {
-    int first   = 0;
-    int pending = 0;
-    pthread_spin_lock(&self->tasks_lock);
-    ntt_task_list_push(&self->tasks_lists, task, &first);
-    if (self->tasks_pending != 0) {
-        self->tasks_pending = 0;
-        pending             = 1;
-    }
-    pthread_spin_unlock(&self->tasks_lock);
-    if (first || pending) {
-        union sigval sigval;
-        sigval.sival_ptr = self;
-        int rc           = 0;
-        do {
-            rc = pthread_sigqueue(self->id, SIGRTNTTUP, sigval);
-        } while (rc == EAGAIN);
-        assert(rc == 0);
-    }
+    assert(self != NULL);
+    assert(task != NULL);
+
+    ntt_log("[t:%ld|w:%ld] push task to w:%ld\n",
+        ntt_this_thread_key(),
+        ntt_this_worker_key(),
+        self->key);
+
+    ntt_worker_push_task_impl(self, task);
 }
 
-void ntt_worker_post_task(
+void ntt_worker_push_task_no_wakeup(
     ntt_worker_t* self,
     ntt_task_t* task)
 {
-    assert(self);
+    assert(self != NULL);
+    assert(task != NULL);
 
-    int first   = 0;
-    int pending = 0;
-    pthread_spin_lock(&self->tasks_lock);
-    ntt_task_list_push(&self->tasks_lists, task, &first);
-    if (first != 0) {
-        self->tasks_pending = 1;
-    }
-    pthread_spin_unlock(&self->tasks_lock);
+    ntt_log("[t:%ld|w:%ld] push task without wakeup to w:%ld\n",
+        ntt_this_thread_key(),
+        ntt_this_worker_key(),
+        self->key);
+
+    ntt_worker_task_queue_post_impl(&self->task_queue, task);
+
+    // ntt_worker_task_queue_idle_post_impl(
+    //     &self->task_queue,
+    //     &t_worker_self->task_queue,
+    //     task);
 }
 
-void ntt_worker_wakeup(
+void ntt_worker_push_task_defer_wakeup(
+    ntt_worker_t* self,
+    ntt_worker_t* sender,
+    ntt_task_t* task)
+{
+    assert(self != NULL);
+    assert(sender != NULL);
+    assert(task != NULL);
+
+    ntt_log("[t:%ld|w:%ld] push task with defer wakeup to w:%ld\n",
+        ntt_this_thread_key(),
+        ntt_this_worker_key(),
+        self->key);
+
+    ntt_worker_task_queue_idle_post_impl(
+        &self->task_queue,
+        &sender->task_queue,
+        task);
+}
+
+void ntt_worker_push_task_impl(
+    ntt_worker_t* self,
+    ntt_task_t* task)
+{
+    assert(self != NULL);
+    assert(task != NULL);
+
+    ntt_worker_task_queue_send_task_impl(
+        &self->task_queue,
+        task);
+}
+
+void ntt_worker_wakeup_impl(
     ntt_worker_t* self)
 {
-    assert(self);
+    assert(self != NULL);
 
     union sigval sigval;
     sigval.sival_ptr = self;
@@ -220,6 +250,36 @@ void ntt_worker_wakeup(
         rc = pthread_sigqueue(self->id, SIGRTNTTUP, sigval);
     } while (rc == EAGAIN);
     assert(rc == 0);
+}
+
+void ntt_worker_wakeup(
+    ntt_worker_t* self)
+{
+    assert(self != NULL);
+
+    ntt_log("[t:%ld|w:%ld] wakeup w:%ld\n",
+        ntt_this_thread_key(),
+        ntt_this_worker_key(),
+        self->key);
+
+    ntt_worker_wakeup_impl(self);
+}
+
+void ntt_worker_defer_wakeup(
+    ntt_worker_t* self,
+    ntt_worker_t* sender)
+{
+    assert(self != NULL);
+    assert(sender != NULL);
+
+    ntt_log("[t:%ld|w:%ld] defer wakeup w:%ld\n",
+        ntt_this_thread_key(),
+        ntt_this_worker_key(),
+        self->key);
+
+    ntt_worker_task_queue_defer_wakeup_impl(
+        &self->task_queue,
+        &sender->task_queue);
 }
 
 ntt_worker_t* ntt_worker_self() { return t_worker_self; }
