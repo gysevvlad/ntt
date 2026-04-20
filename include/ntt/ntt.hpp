@@ -54,7 +54,7 @@ task* make_task(FunctorT&& functor)
 {
     using F = std::remove_cvref_t<FunctorT>;
     static_assert(sizeof(F) <= NTT_TASK_PAYLOAD_SIZE);
-    auto task = ntt_make_task(
+    auto task = ntt_task_create(
         +[](void* payload) {
             auto* f = static_cast<F*>(
                 std::assume_aligned<NTT_TASK_PAYLOAD_ALIGN>(payload));
@@ -66,9 +66,9 @@ task* make_task(FunctorT&& functor)
     return task;
 }
 
-inline void do_task(task* task) { ntt_do_task(task); }
+inline void do_task(task* task) { ntt_task_svc(task); }
 
-inline void free_task(task* task) { ntt_free_task(task); }
+inline void free_task(task* task) { ntt_task_destroy(task); }
 
 inline std::string to_string(const ntt_sockaddr_t* self)
 {

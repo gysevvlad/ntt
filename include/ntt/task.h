@@ -1,18 +1,17 @@
 #pragma once
 
 #include "ntt/defs.h"
-#include "ntt/export.h"
-
-#include <stdint.h>
 
 EXTERN_START
+
+#include <stdint.h>
 
 /**
  * @brief Size of task payload.
  *
  * TODO: dynamic task payload size
  */
-#define NTT_TASK_PAYLOAD_SIZE 38
+#define NTT_TASK_PAYLOAD_SIZE 32
 
 /**
  * @brief Alignment of task payload.
@@ -45,17 +44,19 @@ typedef void ntt_task_t;
  * TODO: dynamic task payload size
  * TODO: over-aligned task payload data
  */
-NTT_EXPORT ntt_task_t* ntt_make_task(ntt_task_cb_t* task_cb,
-    ntt_free_cb_t* free_cb);
+NTT_EXPORT ntt_task_t* ntt_task_create(
+    ntt_task_cb_t* task_cb);
 
 /**
- * @brief Do task.
+ * @brief Execute task.
  */
-NTT_EXPORT void ntt_do_task(ntt_task_t* task);
+NTT_EXPORT void ntt_task_svc(
+    ntt_task_t* self);
 
 /**
- * @brief Free task.
+ * @brief Destroy task.
  */
-NTT_EXPORT void ntt_free_task(void* task);
+NTT_EXPORT void ntt_task_destroy(
+    ntt_task_t* self);
 
 EXTERN_STOP

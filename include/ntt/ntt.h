@@ -16,3 +16,7 @@
 #include "ntt/task_queue.h" // IWYU pragma: export
 #include "ntt/util.h" // IWYU pragma: export
 #include "ntt/worker.h" // IWYU pragma: export
+
+#ifndef ntt_EXPORTS
+#include "ntt/static/ntt.h" // IWYU pragma: export
+#endif

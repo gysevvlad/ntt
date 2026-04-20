@@ -1,6 +1,5 @@
 #include "ntt/defs.h"
-#include "ntt/impl/ntt_task_cache.h"
-#include "ntt/impl/task.h"
+#include "./arena.h"
 #include "task_list.h"
 #include <pthread.h>
 
@@ -49,7 +48,7 @@ ntt_task_t* ntt_task_cache_alloc_task(ntt_task_cache_t* self,
 {
     int last;
     pthread_spin_lock(&self->lock);
-    ntt_task_t* task = ntt_task_list_pop(&self->free_list, &last);
+    // ntt_task_t* task = ntt_task_list_pop(&self->free_list, &last);
     pthread_spin_unlock(&self->lock);
     if (task == NULL) {
         return &ntt_make_task_impl(task_cb, NULL)->payload;

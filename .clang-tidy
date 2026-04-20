@@ -9,11 +9,15 @@ Checks: "
     -hicpp-no-array-decay,
     -llvmlibc-callee-namespace,
     -llvmlibc-implementation-in-namespace,
+    -llvmlibc-inline-function-decl,
     -llvmlibc-restrict-system-libc-headers,
     -modernize-use-trailing-return-type,
-    -readability-identifier-length"
+    -readability-identifier-length,
+  "
 CheckOptions:
     - key: cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor
       value: true
     - key: hicpp-special-member-functions.AllowSoleDefaultDtor
+      value: true
+    - key: modernize-use-using.IgnoreExternC
       value: true

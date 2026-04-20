@@ -1,13 +1,10 @@
-#include "ntt/worker.h"
-
-#include "ntt/impl/task.h"
-#include "ntt/impl/worker_task_queue.h"
+#include "./task.h"
 #include "ntt/log.h"
-#include "ntt/sigset.h"
 
+#include "./task_list.h"
+#include "./worker.h"
 #include "ntt/impl/atomic.h"
-#include "ntt/impl/task_list.h"
-#include "ntt/impl/worker.h"
+#include "queue.h"
 
 #include <assert.h>
 #include <bits/types/sigset_t.h>
@@ -49,8 +46,9 @@ static void ntt_process_nttup_signal_handler(int signum, siginfo_t* info, void* 
     (void)signum;
     (void)context;
 
-    ntt_worker_t* worker  = info->si_value.sival_ptr;
-    worker->task_queue.up = 1;
+    ntt_worker_t* self = info->si_value.sival_ptr;
+
+    self->need_drain_local_queue = 1;
 }
 
 static void ntt_process_setup_signal_action()
@@ -72,6 +70,28 @@ static void ntt_worker_stop_task_free(ntt_task_t* task)
     // do nothing
 }
 
+static void ntt_worker_local_queue_wakeup(void* context, ntt_queue_t* queue)
+{
+    (void)queue;
+
+    assert(context != NULL);
+
+    ntt_worker_t* self = context;
+
+    ntt_log("[t:%ld|w:%ld] send wakeup to w:%ld\n",
+        ntt_this_thread_key(),
+        ntt_this_worker_key(),
+        self->key);
+
+    union sigval sigval;
+    sigval.sival_ptr = self;
+    int rc           = 0;
+    do {
+        rc = pthread_sigqueue(self->id, SIGRTNTTUP, sigval);
+    } while (rc == EAGAIN);
+    assert(rc == 0);
+}
+
 void ntt_worker_init(
     ntt_worker_t* self,
     ntt_worker_cbs_t cbs,
@@ -82,7 +102,8 @@ void ntt_worker_init(
     self->ctx  = ctx;
     self->id   = pthread_self();
     self->key  = atomic_fetch_add(&g_worker_next_key, 1);
-    ntt_worker_task_queue_init_impl(&self->task_queue, self);
+    ntt_queue_init(&self->local_queue, self, ntt_worker_local_queue_wakeup, NULL);
+    self->need_drain_local_queue = 0;
 
     ntt_task_t* task = ntt_task_init(
         &self->stop_task_node,
@@ -96,7 +117,6 @@ void ntt_worker_init(
 void ntt_worker_deinit(
     ntt_worker_t* self)
 {
-    // TODO(vg): ...
 }
 
 ntt_worker_t* ntt_worker_acquire(
@@ -123,7 +143,7 @@ void ntt_worker_release(
 
 NTT_EXPORT int ntt_worker_svc_with_mask(
     ntt_worker_cbs_t cbs,
-    ntt_sigset_t origin_mask,
+    sigset_t* origin_mask,
     void* ctx)
 {
     ntt_worker_t worker;
@@ -146,10 +166,10 @@ NTT_EXPORT int ntt_worker_svc_with_mask(
 
     while (!worker.stopped) {
         ntt_log("[t:%ld|w:%ld] run svc callback\n", ntt_this_thread_key(), ntt_this_worker_key());
-        worker.cbs.svc_cb(worker.ctx, &origin_mask);
-        if (worker.task_queue.up) {
-            ntt_worker_task_queue_svc_impl(&worker.task_queue);
-            worker.task_queue.up = 0;
+        worker.cbs.svc_cb(worker.ctx, origin_mask);
+        if (worker.need_drain_local_queue == 1) {
+            ntt_queue_svc(&worker.local_queue);
+            worker.need_drain_local_queue = 0;
         }
     }
     t_worker_self = NULL;
@@ -166,9 +186,9 @@ int ntt_worker_svc(
     ntt_worker_cbs_t cbs,
     void* ctx)
 {
-    ntt_sigset_t origin_mask;
-    pthread_sigmask(SIG_SETMASK, NULL, (sigset_t*)origin_mask.data);
-    return ntt_worker_svc_with_mask(cbs, origin_mask, ctx);
+    sigset_t origin_mask;
+    pthread_sigmask(SIG_SETMASK, NULL, &origin_mask);
+    return ntt_worker_svc_with_mask(cbs, &origin_mask, ctx);
 }
 
 void ntt_worker_push_task(
@@ -183,103 +203,7 @@ void ntt_worker_push_task(
         ntt_this_worker_key(),
         self->key);
 
-    ntt_worker_push_task_impl(self, task);
-}
-
-void ntt_worker_push_task_no_wakeup(
-    ntt_worker_t* self,
-    ntt_task_t* task)
-{
-    assert(self != NULL);
-    assert(task != NULL);
-
-    ntt_log("[t:%ld|w:%ld] push task without wakeup to w:%ld\n",
-        ntt_this_thread_key(),
-        ntt_this_worker_key(),
-        self->key);
-
-    ntt_worker_task_queue_post_impl(&self->task_queue, task);
-
-    // ntt_worker_task_queue_idle_post_impl(
-    //     &self->task_queue,
-    //     &t_worker_self->task_queue,
-    //     task);
-}
-
-void ntt_worker_push_task_defer_wakeup(
-    ntt_worker_t* self,
-    ntt_worker_t* sender,
-    ntt_task_t* task)
-{
-    assert(self != NULL);
-    assert(sender != NULL);
-    assert(task != NULL);
-
-    ntt_log("[t:%ld|w:%ld] push task with defer wakeup to w:%ld\n",
-        ntt_this_thread_key(),
-        ntt_this_worker_key(),
-        self->key);
-
-    ntt_worker_task_queue_idle_post_impl(
-        &self->task_queue,
-        &sender->task_queue,
-        task);
-}
-
-void ntt_worker_push_task_impl(
-    ntt_worker_t* self,
-    ntt_task_t* task)
-{
-    assert(self != NULL);
-    assert(task != NULL);
-
-    ntt_worker_task_queue_send_task_impl(
-        &self->task_queue,
-        task);
-}
-
-void ntt_worker_wakeup_impl(
-    ntt_worker_t* self)
-{
-    assert(self != NULL);
-
-    union sigval sigval;
-    sigval.sival_ptr = self;
-    int rc           = 0;
-    do {
-        rc = pthread_sigqueue(self->id, SIGRTNTTUP, sigval);
-    } while (rc == EAGAIN);
-    assert(rc == 0);
-}
-
-void ntt_worker_wakeup(
-    ntt_worker_t* self)
-{
-    assert(self != NULL);
-
-    ntt_log("[t:%ld|w:%ld] wakeup w:%ld\n",
-        ntt_this_thread_key(),
-        ntt_this_worker_key(),
-        self->key);
-
-    ntt_worker_wakeup_impl(self);
-}
-
-void ntt_worker_defer_wakeup(
-    ntt_worker_t* self,
-    ntt_worker_t* sender)
-{
-    assert(self != NULL);
-    assert(sender != NULL);
-
-    ntt_log("[t:%ld|w:%ld] defer wakeup w:%ld\n",
-        ntt_this_thread_key(),
-        ntt_this_worker_key(),
-        self->key);
-
-    ntt_worker_task_queue_defer_wakeup_impl(
-        &self->task_queue,
-        &sender->task_queue);
+    ntt_queue_push_task(&self->local_queue, task);
 }
 
 ntt_worker_t* ntt_worker_self() { return t_worker_self; }

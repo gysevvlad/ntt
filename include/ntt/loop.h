@@ -1,29 +1,25 @@
 #pragma once
 
 #include <ntt/defs.h>
+#include <ntt/queue.h>
 
 EXTERN_START
 
+/**
+ * @brief Ntt event loop.
+ */
 typedef struct ntt_loop ntt_loop_t;
 
+/**
+ * @brief Ntt event loop callbacks.
+ */
 typedef struct ntt_loop_cbs {
-    void (*on_start)(ntt_loop_t* loop, void* ctx);
-    void (*on_signal)(ntt_loop_t* loop, void* ctx, int signal);
+    void (*on_start)(void* ctx, ntt_queue_t* queue);
 } ntt_loop_cbs_t;
 
-static inline ntt_loop_cbs_t ntt_loop_cbs_make(
-    void (*started)(ntt_loop_t* loop, void* ctx),
-    void (*on_signal)(ntt_loop_t* loop, void* ctx, int signal))
-{
-    ntt_loop_cbs_t cbs;
-    cbs.on_start  = started;
-    cbs.on_signal = on_signal;
-    return cbs;
-}
-
-NTT_EXPORT int ntt_loop_svc(ntt_loop_cbs_t cbs, void* ctx, unsigned width);
-
-NTT_EXPORT ntt_loop_t* ntt_loop_acquire(ntt_loop_t* self);
-NTT_EXPORT void ntt_loop_release(ntt_loop_t* self);
+/**
+ * @brief Run ntt event loop.
+ */
+NTT_EXPORT int ntt_loop_run(ntt_loop_cbs_t cbs, void* ctx, unsigned width);
 
 EXTERN_STOP

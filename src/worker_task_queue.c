@@ -2,6 +2,7 @@
 
 #include "ntt/impl/list.h"
 #include "ntt/impl/task.h"
+#include "ntt/impl/task_list.h"
 #include "ntt/impl/worker.h"
 #include "ntt/worker.h"
 
@@ -90,16 +91,17 @@ void ntt_worker_task_queue_svc_impl(
                 pthread_spin_unlock(&self->lock);
                 return;
             }
-            ntt_list_swap(&tasks.list, &self->tasks.list);
+            // TODO(vg): do something smart
+            // ntt_list_swap(&tasks.list, &self->tasks.list);
             pthread_spin_unlock(&self->lock);
         }
-        int last = 0;
+        ntt_task_t* task = ntt_task_list_front(&tasks);
         do {
-            ntt_task_t* task = ntt_task_list_pop(&tasks, &last);
-            assert(task != NULL);
             ntt_do_task_inl(task);
-            ntt_free_task_inl(task);
-        } while (!last);
+            ntt_task_t *prev = task;
+            task = ntt_task_list_next(&tasks);
+            ntt_free_task_inl(prev);
+        } while (!task);
     }
 }
 

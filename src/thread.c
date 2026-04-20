@@ -1,5 +1,6 @@
 #include "ntt/impl/thread.h"
 #include "ntt/impl/event.h"
+#include "ntt/impl/task_list.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -10,7 +11,7 @@
 void ntt_thread_stop_task_svc(ntt_task_t* task)
 {
     ntt_thread_t* self = *(ntt_thread_t**)task;
-    self->active = 0;
+    self->active       = 0;
 }
 
 void ntt_thread_stop_task_free(ntt_task_t* task)
@@ -20,16 +21,15 @@ void ntt_thread_stop_task_free(ntt_task_t* task)
 
 void ntt_thread_drain_tasks(ntt_thread_t* self)
 {
-    int last;
+    ntt_task_t* task = ntt_task_list_front(&self->tasks_lists);
     do {
-        ntt_task_t* task = ntt_task_list_front(&self->tasks_lists);
-        assert(task != NULL);
         ntt_do_task_inl(task);
+        ntt_task_t* prev = task;
         pthread_spin_lock(&self->tasks_lock);
-        ntt_task_list_pop(&self->tasks_lists, &last);
+        task = ntt_task_list_next(&self->tasks_lists);
         pthread_spin_unlock(&self->tasks_lock);
-        ntt_free_task_inl(task);
-    } while (!last);
+        ntt_free_task_inl(prev);
+    } while (!task);
 }
 
 void ntt_thread_up(ntt_thread_t* self) { ntt_thread_drain_tasks(self); }
@@ -79,15 +79,15 @@ void ntt_up_signal_handler(int signo, siginfo_t* info, void* context)
 {
     assert(signo == SIGRTNTTUP);
     ntt_thread_t* thread = info->si_value.sival_ptr;
-    thread->got_up = 1;
+    thread->got_up       = 1;
 }
 
 void ntt_thread_setup_signal_action()
 {
     struct sigaction action = { 0 };
-    action.sa_flags = SA_SIGINFO;
-    action.sa_sigaction = ntt_up_signal_handler;
-    int rc = sigaction(SIGRTNTTUP, &action, NULL);
+    action.sa_flags         = SA_SIGINFO;
+    action.sa_sigaction     = ntt_up_signal_handler;
+    int rc                  = sigaction(SIGRTNTTUP, &action, NULL);
     assert(rc != -1);
 }
 
@@ -100,11 +100,11 @@ void ntt_thread_init(
     ntt_thread_setup_signal_action();
 
     self->epoll_fd = epoll_fd;
-    self->active = 1;
+    self->active   = 1;
 
     self->complete_cb = complete_cb;
-    self->context = context;
-    self->stopped = 0;
+    self->context     = context;
+    self->stopped     = 0;
 
     pthread_spin_init(&self->tasks_lock, PTHREAD_PROCESS_PRIVATE);
     self->got_up = 0;

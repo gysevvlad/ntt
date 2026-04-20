@@ -2,9 +2,9 @@
 
 #include "ntt/defs.h"
 
-#include <stddef.h>
-
 EXTERN_START
+
+#include <stddef.h>
 
 void* ntt_malloc(size_t s);
 
