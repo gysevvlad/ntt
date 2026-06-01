@@ -11,4 +11,11 @@ EXTERN_START
  */
 #define NTT_SIGRTUP SIGRTMIN
 
+/**
+ * @brief Check that sigup signal blocked.
+ */
+int ntt_sigup_blocked();
+
+void ntt_print_blocked_signals(sigset_t* sigset);
+
 EXTERN_STOP

@@ -91,6 +91,8 @@ ntt_task_t* ntt_queue_next(ntt_queue_t* queue);
 /**
  * @brief Push task to the queue.
  *
+ * @note Acquires the queue if it was empty before the push.
+ *
  * @pre ntt_task_unlinked(task) == 1
  */
 void ntt_queue_push_task(ntt_queue_t* queue, ntt_task_t* task);
@@ -99,13 +101,16 @@ void ntt_queue_push_task(ntt_queue_t* queue, ntt_task_t* task);
  * @brief Push task to the queue without invoking wakeup callback.
  *
  * Adds a task to the queue internal list without triggering the wakeup callback.
- * This is useful when wakeup is processed by the caller side.
+ * This is useful when wakeup is processed by the caller side (e.g., after batch
+ * push operations). The queue may be linked or unlinked.
+ *
+ * @note The function never acquire the queue.
  *
  * @param[in] queue The target queue.
  * @param[in] task The task to push.
  *
  * @return Returns 1 if the queue was empty before the push (meaning queue must be
- *         executed), 0 otherwise.
+ *         executed by the caller side), 0 otherwise.
  *
  * @pre ntt_task_unlinked(task) == 1
  */
@@ -121,6 +126,9 @@ int ntt_queue_push_task_without_wakeup(ntt_queue_t* queue, ntt_task_t* task);
  *         and there are still tasks left in the queue.
  *         Otherwise, returns the number of completed tasks.
  *
+ * @note Releases the queue only if returns non-zero (all tasks completed).
+ *       The self pointer may be deleted after return.
+ *
  * @pre ntt_queue_empty(qeueu) == 0
  * @pre ntt_queue_unlinked(queue) == 1
  */
@@ -129,7 +137,9 @@ size_t ntt_queue_svc_with_limit(ntt_queue_t* queue, size_t limit);
 /**
  * @brief Execute tasks in queue.
  *
- * @param[in] queue The queue from which events will be executed.
+ * @param[in] self The queue from which events will be executed.
+ *
+ * @note Always releases the queue. The self pointer may be deleted after return.
  *
  * @pre ntt_queue_empty(self) == 0
  * @pre ntt_queue_unlinked(self) == 1

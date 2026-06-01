@@ -1,9 +1,12 @@
 #include "ntt/queue.h"
 #include "ntt/task.hpp"
 #include "queue.h"
+#include <chrono>
+#include <future>
 #include <gtest/gtest.h>
 
 #include <ntt/loop.h>
+#include <thread>
 
 TEST(LoopTest, CreateEmpty)
 {
@@ -59,4 +62,44 @@ TEST(LoopTest, StartSequence)
         &context, 4);
 
     ASSERT_EQ(context.cnt, g_task_cnt);
+}
+
+TEST(LoopTest, ExternalTasks)
+{
+    static constexpr std::size_t g_task_cnt = 1'000;
+
+    struct Context {
+        std::promise<ntt_queue_t*> promise;
+    } context;
+
+    std::size_t cnt = 0;
+    {
+        auto future = context.promise.get_future();
+
+        std::jthread thread { [&] {
+            ntt_loop_run(
+                ntt_loop_cbs_t {
+                    .on_start = [](void* ctx, ntt_queue_t* queue) {
+                        auto& context = *static_cast<Context*>(ctx);
+                        context.promise.set_value(ntt_queue_acquire(queue));
+                    },
+                },
+                &context, 8);
+        } };
+
+        auto* queue = future.get();
+
+        for (std::size_t i = 0; i < g_task_cnt; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds { 1 });
+            ntt_queue_push_task(
+                queue,
+                ntt::make_task([&] {
+                    cnt += 1;
+                }));
+        }
+
+        ntt_queue_release(queue);
+    }
+
+    ASSERT_EQ(cnt, g_task_cnt);
 }

@@ -10,6 +10,7 @@ set(NTT_SOURCES
   src/queue.c
   src/task.c
   src/worker.c
+  src/signal.c
 )
 
 set(NTT_TEST_SOURCES

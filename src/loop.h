@@ -40,7 +40,10 @@ struct ntt_loop {
     pthread_cond_t cv;
     unsigned enter_cnt;
     unsigned width;
+
     ntt_combine_t combine;
+    int combine_eventfd;
+    ntt_epoll_event_t combine_event;
 
     // pthread_cond_t cnd;
     ntt_loop_worker_ctx_t workers[];

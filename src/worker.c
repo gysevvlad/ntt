@@ -5,6 +5,7 @@
 #include "./worker.h"
 #include "ntt/impl/atomic.h"
 #include "queue.h"
+#include "signal.h"
 
 #include <assert.h>
 #include <bits/types/sigset_t.h>
@@ -87,7 +88,7 @@ static void ntt_worker_local_queue_wakeup(void* context, ntt_queue_t* queue)
     sigval.sival_ptr = self;
     int rc           = 0;
     do {
-        rc = pthread_sigqueue(self->id, SIGRTNTTUP, sigval);
+        rc = pthread_sigqueue(self->id, NTT_SIGRTUP, sigval);
     } while (rc == EAGAIN);
     assert(rc == 0);
 }
@@ -132,13 +133,27 @@ ntt_worker_t* ntt_worker_acquire(
 void ntt_worker_release(
     ntt_worker_t* self)
 {
-    if (self != NULL) {
-        size_t prev = atomic_fetch_sub(&self->refs, 1);
-        assert(prev != -1 && "[ntt_worker_release]: trying to release already released object");
-        if (prev == 1) {
-            ntt_worker_push_task(self, &self->stop_task_node.payload);
-        }
+    if ntt_unlikely (self == NULL) {
+        assert(0);
+        return;
     }
+
+    size_t prev = atomic_fetch_sub(&self->refs, 1);
+    assert(prev != -1 && "[ntt_worker_release]: trying to release already released object");
+
+    if ntt_likely (prev != 1) {
+        return;
+    }
+
+    ntt_log(
+        "[t:%ld|w:%ld] send stop task to w:%ld\n",
+        ntt_this_thread_key(),
+        ntt_this_worker_key(),
+        self->key);
+
+    ntt_queue_push_task(
+        &self->local_queue,
+        &self->stop_task_node.payload);
 }
 
 NTT_EXPORT int ntt_worker_svc_with_mask(
@@ -155,11 +170,16 @@ NTT_EXPORT int ntt_worker_svc_with_mask(
 
     sigset_t nttup;
     sigemptyset(&nttup);
-    sigaddset(&nttup, SIGRTNTTUP);
+    sigaddset(&nttup, NTT_SIGRTUP);
 
     pthread_sigmask(SIG_BLOCK, &nttup, NULL);
 
     t_worker_self = &worker;
+
+    ntt_log(
+        "[t:%ld|w:%ld] enter\n",
+        ntt_this_thread_key(),
+        ntt_this_worker_key());
 
     worker.cbs.enter_cb(worker.ctx, &worker);
     ntt_worker_release(&worker);
@@ -168,12 +188,18 @@ NTT_EXPORT int ntt_worker_svc_with_mask(
         ntt_log("[t:%ld|w:%ld] run svc callback\n", ntt_this_thread_key(), ntt_this_worker_key());
         worker.cbs.svc_cb(worker.ctx, origin_mask);
         if (worker.need_drain_local_queue == 1) {
+            ntt_log("[t:%ld|w:%ld] svc local queue\n", ntt_this_thread_key(), ntt_this_worker_key());
             ntt_queue_svc(&worker.local_queue);
             worker.need_drain_local_queue = 0;
         }
     }
     t_worker_self = NULL;
     worker.cbs.leave_cb(worker.ctx);
+
+    ntt_log(
+        "[t:%ld|w:%ld] leave\n",
+        ntt_this_thread_key(),
+        worker.key);
 
     ntt_worker_deinit(&worker);
 

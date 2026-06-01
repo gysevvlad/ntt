@@ -61,7 +61,7 @@ TEST(CombineTest, Common)
             spawn(1, queues, cnts);
         }));
 
-    ntt_combine_svc(&combine, SIZE_MAX, SIZE_MAX);
+    ntt_combine_svc_with_limits(&combine, SIZE_MAX, SIZE_MAX);
     std::cout << "Total count: " << std::accumulate(cnts.begin(), cnts.end(), 0) << std::endl;
     std::cout << cnts[0];
     for (std::size_t i = 1; i < cnts.size(); ++i) {
@@ -101,7 +101,7 @@ TEST(CombineTest, Multithreaded)
     for (std::size_t i = 0; i < g_thread_cnt; ++i) {
         threads.emplace_back([&] {
             while (std::accumulate(cnts.begin(), cnts.end(), 0) != g_task_cnt) {
-                ntt_combine_svc(&combine, 128, 1024);
+                ntt_combine_svc_with_limits(&combine, 128, 1024);
                 std::atomic_thread_fence(std::memory_order_acq_rel);
             }
         });

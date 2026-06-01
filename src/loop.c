@@ -14,13 +14,22 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
 #include <threads.h>
 
 static ntt_loop_t* g_main_loop = NULL;
 
-static thread_local ntt_loop_t* t_loop = NULL;
+static thread_local ntt_loop_t* ntt_ts_loop = NULL;
 
-void ntt_loop_follower_enter(void* ctx, ntt_worker_t* worker)
+/**
+ * @brief Follower thread enter callback.
+ *
+ * Performs:
+ *  1. Acquires worker reference.
+ *  2. Notifies leader that thread is running.
+ *  3. Sets up thread-local reference to active loop.
+ */
+static void ntt_loop_follower_enter(void* ctx, ntt_worker_t* worker)
 {
     ntt_loop_worker_ctx_t* context = ctx;
 
@@ -33,67 +42,28 @@ void ntt_loop_follower_enter(void* ctx, ntt_worker_t* worker)
     pthread_cond_signal(&self->cv);
     pthread_mutex_unlock(&self->mtx);
 
-    t_loop = self;
+    ntt_ts_loop = self;
 }
 
-void ntt_loop_drain_combine(ntt_loop_t* self)
-{
-    for (;;) {
-        ntt_queue_t* queue = ntt_combine_try_take(&self->combine);
-
-        if (queue == NULL) {
-            break;
-        }
-
-        ntt_queue_svc(queue);
-    }
-}
-
-void ntt_loop_svc(void* ctx, sigset_t* sigset)
-{
-    ntt_loop_worker_ctx_t* context = ctx;
-    ntt_loop_t* self               = context->loop;
-
-    struct epoll_event event;
-    int rc = 0;
-
-    for (;;) {
-        ntt_loop_drain_combine(self);
-
-        rc = epoll_pwait(
-            self->epoll_fd,
-            &event,
-            1,
-            -1,
-            sigset);
-
-        if ntt_unlikely (rc <= 0) {
-            break;
-        }
-
-        ntt_epoll_event_ready(&event);
-    }
-}
-
-void ntt_loop_follower_leave(void* ctx)
-{
-    // TODO(vg): ...
-}
-
-const static ntt_worker_cbs_t g_ntt_loop_follower_cbs = {
-    .enter_cb = ntt_loop_follower_enter,
-    .svc_cb   = ntt_loop_svc,
-    .leave_cb = ntt_loop_follower_leave,
-};
-
-void ntt_loop_start_task_svc(void* payload)
+/**
+ * @brief Start task svc.
+ */
+static void ntt_loop_start_task_svc(void* payload)
 {
     ntt_loop_t* self = *(ntt_loop_t**)payload;
-
     self->cbs.on_start(self->ctx, ntt_queue_self());
 }
 
-void ntt_loop_leader_enter(void* ctx, ntt_worker_t* worker)
+/**
+ * @brief Leader thread enter callback.
+ *
+ * Performs:
+ *  1. Acquires worker reference.
+ *  2. Waits for all workers to enter.
+ *  3. Sets up thread-local reference to active loop.
+ *  4. Creates main queue.
+ */
+static void ntt_loop_leader_enter(void* ctx, ntt_worker_t* worker)
 {
     ntt_loop_worker_ctx_t* context = ctx;
 
@@ -108,7 +78,7 @@ void ntt_loop_leader_enter(void* ctx, ntt_worker_t* worker)
     }
     pthread_mutex_unlock(&self->mtx);
 
-    t_loop = self;
+    ntt_ts_loop = self;
 
     ntt_queue_t* queue = ntt_malloc(sizeof(ntt_queue_t));
 
@@ -127,17 +97,121 @@ void ntt_loop_leader_enter(void* ctx, ntt_worker_t* worker)
     ntt_queue_release(queue);
 }
 
-const static ntt_worker_cbs_t g_ntt_loop_leader_cbs = {
-    .enter_cb = ntt_loop_leader_enter,
-    .svc_cb   = ntt_loop_svc,
-    .leave_cb = ntt_loop_follower_leave,
-};
-
-static void* ntt_loop_worker_svc(void* ctx)
+/**
+ * @brief Loop worker service callback.
+ *
+ * Performs:
+ *  1. Drains combine queue.
+ *  2. Waits for epoll events.
+ *  3. Processes ready events.
+ */
+static void ntt_loop_worker_svc(void* ctx, sigset_t* sigset)
 {
-    ntt_worker_svc(g_ntt_loop_follower_cbs, ctx);
+    ntt_loop_worker_ctx_t* context = ctx;
+    ntt_loop_t* self               = context->loop;
+
+    struct epoll_event event;
+    int rc = 0;
+
+    for (;;) {
+        ntt_combine_svc(&self->combine);
+
+        rc = epoll_pwait(
+            self->epoll_fd,
+            &event,
+            1,
+            -1,
+            sigset);
+
+        if ntt_unlikely (rc <= 0) {
+            break;
+        }
+
+        ntt_epoll_event_ready(&event);
+    }
+}
+
+/**
+ * @brief Loop worker leave callback.
+ *
+ * Clears thread-local loop reference.
+ */
+static void ntt_loop_worker_leave(void* ctx)
+{
+    (void)ctx;
+
+    ntt_ts_loop = NULL;
+}
+
+/**
+ * @brief Follower thread entry point.
+ */
+static void* ntt_loop_follower_thread_svc(void* ctx)
+{
+    ntt_worker_cbs_t cbs = {
+        .enter_cb = ntt_loop_follower_enter,
+        .svc_cb   = ntt_loop_worker_svc,
+        .leave_cb = ntt_loop_worker_leave,
+    };
+    ntt_worker_svc(cbs, ctx);
     return NULL;
 }
+
+/**
+ * @brief Combine became non-emty.
+ *
+ * Maybe be called from any thread.
+ */
+static void ntt_loop_combine_wakeup(ntt_loop_t* self, ntt_combine_t* combine)
+{
+    (void)combine;
+
+    if (ntt_ts_loop != self) {
+        // wakeup from external thread
+        eventfd_t value = 1;
+        eventfd_write(self->combine_eventfd, value);
+    }
+}
+
+/**
+ * @brief Combine eventfd notification ready.
+ *
+ * @note TODO:
+ *  1. Check 1:1 notifications.
+ *  2. Check how it would be work in multiple writes/reader in diffrenet modes.
+ */
+void ntt_combine_eventfd_ready(ntt_epoll_event_t* event, ntt_loop_t* self, uint32_t events)
+{
+    (void)self;
+    (void)event;
+    (void)events;
+
+    eventfd_t value = 0;
+    if (eventfd_read(self->combine_eventfd, &value) != 0) {
+        if (errno != EAGAIN) {
+            printf("read event fd fail %i\n", errno);
+            abort();
+        }
+    }
+}
+
+/**
+ * @brief Dummy combine eventfd cancellation.
+ */
+void ntt_combine_eventfd_cancelled(ntt_epoll_event_t* event, ntt_loop_t* self)
+{
+    (void)event;
+    (void)self;
+}
+
+/**
+ * @brief Combine eventfd virtual table.
+ */
+const static ntt_epoll_event_vtbl_t ntt_g_combine_eventfd_cbs = {
+    .name      = "combine_eventfd",
+    .ready     = (void (*)(ntt_epoll_event_t*, void*, uint32_t))ntt_combine_eventfd_ready,
+    .cancelled = (void (*)(ntt_epoll_event_t*, void*))ntt_combine_eventfd_cancelled,
+};
 
 int ntt_loop_run(ntt_loop_cbs_t cbs, void* ctx, unsigned width)
 {
@@ -167,7 +241,27 @@ int ntt_loop_run(ntt_loop_cbs_t cbs, void* ctx, unsigned width)
     self->width     = width;
     self->work_cnt  = 1;
 
-    ntt_combine_init(&self->combine);
+    ntt_combine_init_with_wakeup(
+        &self->combine,
+        self,
+        (ntt_combine_wakeup_cb_t*)ntt_loop_combine_wakeup);
+
+    int combine_eventfd_flags = EFD_CLOEXEC | EFD_NONBLOCK | EFD_SEMAPHORE;
+    self->combine_eventfd     = eventfd(0, combine_eventfd_flags);
+    if (self->combine_eventfd == -1) {
+        // TODO(vg): handle error
+        abort();
+    }
+
+    ntt_epoll_event_init(&self->combine_event, &ntt_g_combine_eventfd_cbs, self, 0);
+    struct epoll_event event;
+    event.events   = EPOLLIN | EPOLLEXCLUSIVE;
+    event.data.ptr = &self->combine_event;
+    int rc         = epoll_ctl(self->epoll_fd, EPOLL_CTL_ADD, self->combine_eventfd, &event);
+    if (rc == -1) {
+        // TODO(vg): handle error
+        abort();
+    }
 
     unsigned i = 0;
 
@@ -183,7 +277,7 @@ int ntt_loop_run(ntt_loop_cbs_t cbs, void* ctx, unsigned width)
         int rc = pthread_create(
             &self->workers[i].thread_id,
             NULL,
-            ntt_loop_worker_svc,
+            ntt_loop_follower_thread_svc,
             &self->workers[i]);
 
         if (rc != 0) {
@@ -192,7 +286,13 @@ int ntt_loop_run(ntt_loop_cbs_t cbs, void* ctx, unsigned width)
         }
     }
 
-    ntt_worker_svc(g_ntt_loop_leader_cbs, &self->workers[0]);
+    ntt_worker_cbs_t leader_thread_cbs = {
+        .enter_cb = ntt_loop_leader_enter,
+        .svc_cb   = ntt_loop_worker_svc,
+        .leave_cb = ntt_loop_worker_leave,
+    };
+
+    ntt_worker_svc(leader_thread_cbs, &self->workers[0]);
 
     for (i = 1; i < width; ++i) {
         pthread_join(self->workers[i].thread_id, NULL);

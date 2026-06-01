@@ -11,6 +11,19 @@ void ntt_combine_init(ntt_combine_t* self)
 {
     ntt_list_init(&self->list);
     pthread_spin_init(&self->lock, 0);
+    self->ctx = NULL;
+    self->cb  = NULL;
+}
+
+void ntt_combine_init_with_wakeup(
+    ntt_combine_t* self,
+    void* ctx,
+    ntt_combine_wakeup_cb_t* cb)
+{
+    ntt_list_init(&self->list);
+    pthread_spin_init(&self->lock, 0);
+    self->ctx = ctx;
+    self->cb  = cb;
 }
 
 int ntt_combine_empty(ntt_combine_t* self)
@@ -31,8 +44,12 @@ void ntt_combine_push(ntt_combine_t* self, ntt_queue_t* queue)
     assert(ntt_queue_unlinked(queue) == 1);
 
     pthread_spin_lock(&self->lock);
-    ntt_list_push_back(&self->list, &queue->node);
+    int was_empty = ntt_list_push_back(&self->list, &queue->node);
     pthread_spin_unlock(&self->lock);
+
+    if (self->cb != NULL && was_empty == 1) {
+        self->cb(self->ctx, self);
+    }
 }
 
 ntt_queue_t* ntt_combine_try_take(ntt_combine_t* self)
@@ -49,7 +66,21 @@ ntt_queue_t* ntt_combine_try_take(ntt_combine_t* self)
     return queue;
 }
 
-int ntt_combine_svc(
+void ntt_combine_svc(ntt_combine_t* self)
+{
+    for (;;) {
+        ntt_queue_t* queue = ntt_combine_try_take(self);
+
+        if (queue == NULL) {
+            // the queue is exhausted
+            break;
+        }
+
+        ntt_queue_svc(queue);
+    }
+}
+
+int ntt_combine_svc_with_limits(
     ntt_combine_t* self,
     size_t loop_limit,
     size_t queue_limit)
