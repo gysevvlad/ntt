@@ -1,9 +1,13 @@
 #pragma once
 
+#include "ntt/task.h"
+
 #include <ntt/defs.h>
 #include <ntt/queue.h>
 
 EXTERN_START
+
+#define NTT_MAX_LOOP_WIDTH 8
 
 /**
  * @brief Ntt event loop.
@@ -11,15 +15,8 @@ EXTERN_START
 typedef struct ntt_loop ntt_loop_t;
 
 /**
- * @brief Ntt event loop callbacks.
+ * @brief Run the ntt event loop.
  */
-typedef struct ntt_loop_cbs {
-    void (*on_start)(void* ctx, ntt_queue_t* queue);
-} ntt_loop_cbs_t;
-
-/**
- * @brief Run ntt event loop.
- */
-NTT_EXPORT int ntt_loop_run(ntt_loop_cbs_t cbs, void* ctx, unsigned width);
+NTT_EXPORT int ntt_loop_run(ntt_task_t* task, unsigned width);
 
 EXTERN_STOP

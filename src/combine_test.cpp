@@ -25,7 +25,7 @@ void spawn(std::size_t wave, std::deque<ntt_queue_t>& queues, std::deque<std::at
             ntt_queue_push(
                 &queues[j],
                 ntt::make_task([wave = wave + 1, &queues, j, &cnts] {
-                    cnts[j].store(cnts[j].load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+                    cnts[j].fetch_add(1);
                     spawn(wave, queues, cnts);
                 }));
         }
@@ -94,25 +94,20 @@ TEST(CombineTest, Multithreaded)
 
     static constexpr std::size_t g_task_cnt = (1 << g_wave_cnt) - 1;
 
-    std::cout << g_task_cnt << std::endl;
-
-    std::vector<std::jthread> threads;
-    threads.reserve(g_thread_cnt);
-    for (std::size_t i = 0; i < g_thread_cnt; ++i) {
-        threads.emplace_back([&] {
-            while (std::accumulate(cnts.begin(), cnts.end(), 0) != g_task_cnt) {
-                ntt_combine_svc_with_limits(&combine, 128, 1024);
-                std::atomic_thread_fence(std::memory_order_acq_rel);
-            }
-        });
-    }
-
     ntt_queue_push(
         &queues[0],
         ntt::make_task([&queues, &cnts] {
             cnts[0] += 1;
             spawn(1, queues, cnts);
         }));
+
+    std::vector<std::jthread> threads;
+    threads.reserve(g_thread_cnt);
+    for (std::size_t i = 0; i < g_thread_cnt; ++i) {
+        threads.emplace_back([&] {
+            ntt_combine_svc_with_limits(&combine, SIZE_MAX, SIZE_MAX);
+        });
+    }
 
     threads.clear();
 

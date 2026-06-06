@@ -1,12 +1,16 @@
 #include "./loop.h"
+#include "./die.h"
 #include "./signal.h"
 #include "./worker.h"
 #include "combine.h"
+#include "malloc.h"
 #include "ntt/impl/epoll_event.h"
+#include "ntt/loop.h"
 #include "ntt/queue.h"
 #include "ntt/task.h"
 #include "queue.h"
 
+#include <assert.h>
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
@@ -21,15 +25,7 @@ static ntt_loop_t* g_main_loop = NULL;
 
 static thread_local ntt_loop_t* ntt_ts_loop = NULL;
 
-/**
- * @brief Follower thread enter callback.
- *
- * Performs:
- *  1. Acquires worker reference.
- *  2. Notifies leader that thread is running.
- *  3. Sets up thread-local reference to active loop.
- */
-static void ntt_loop_follower_enter(void* ctx, ntt_worker_t* worker)
+static void ntt_loop_worker_enter(void* ctx, ntt_worker_t* worker)
 {
     ntt_loop_worker_ctx_t* context = ctx;
 
@@ -39,62 +35,16 @@ static void ntt_loop_follower_enter(void* ctx, ntt_worker_t* worker)
 
     pthread_mutex_lock(&self->mtx);
     self->enter_cnt += 1;
-    pthread_cond_signal(&self->cv);
-    pthread_mutex_unlock(&self->mtx);
-
-    ntt_ts_loop = self;
-}
-
-/**
- * @brief Start task svc.
- */
-static void ntt_loop_start_task_svc(void* payload)
-{
-    ntt_loop_t* self = *(ntt_loop_t**)payload;
-    self->cbs.on_start(self->ctx, ntt_queue_self());
-}
-
-/**
- * @brief Leader thread enter callback.
- *
- * Performs:
- *  1. Acquires worker reference.
- *  2. Waits for all workers to enter.
- *  3. Sets up thread-local reference to active loop.
- *  4. Creates main queue.
- */
-static void ntt_loop_leader_enter(void* ctx, ntt_worker_t* worker)
-{
-    ntt_loop_worker_ctx_t* context = ctx;
-
-    context->worker = ntt_worker_acquire(worker);
-
-    ntt_loop_t* self = context->loop;
-
-    pthread_mutex_lock(&self->mtx);
-    self->enter_cnt += 1;
-    while (self->enter_cnt < self->width) {
-        pthread_cond_wait(&self->cv, &self->mtx);
+    if (self->enter_cnt < self->width) {
+        do {
+            pthread_cond_wait(&self->cv, &self->mtx);
+        } while (self->enter_cnt < self->width);
+    } else {
+        pthread_cond_broadcast(&self->cv);
     }
     pthread_mutex_unlock(&self->mtx);
 
     ntt_ts_loop = self;
-
-    ntt_queue_t* queue = ntt_malloc(sizeof(ntt_queue_t));
-
-    ntt_queue_init(
-        queue,
-        &self->combine,
-        (ntt_queue_wakeup_cb_t*)ntt_combine_push,
-        self);
-
-    ntt_loop_work_leave(self);
-
-    void* task    = ntt_task_create(ntt_loop_start_task_svc);
-    *(void**)task = self;
-
-    ntt_queue_push_task(queue, task);
-    ntt_queue_release(queue);
 }
 
 /**
@@ -143,17 +93,22 @@ static void ntt_loop_worker_leave(void* ctx)
     ntt_ts_loop = NULL;
 }
 
+ntt_worker_cbs_t ntt_loop_make_worker_cbs()
+{
+    ntt_worker_cbs_t cbs = {
+        .enter_cb = ntt_loop_worker_enter,
+        .svc_cb   = ntt_loop_worker_svc,
+        .leave_cb = ntt_loop_worker_leave,
+    };
+    return cbs;
+}
+
 /**
  * @brief Follower thread entry point.
  */
 static void* ntt_loop_follower_thread_svc(void* ctx)
 {
-    ntt_worker_cbs_t cbs = {
-        .enter_cb = ntt_loop_follower_enter,
-        .svc_cb   = ntt_loop_worker_svc,
-        .leave_cb = ntt_loop_worker_leave,
-    };
-    ntt_worker_svc(cbs, ctx);
+    ntt_worker_svc(ntt_loop_make_worker_cbs(), ctx);
     return NULL;
 }
 
@@ -213,30 +168,81 @@ const static ntt_epoll_event_vtbl_t ntt_g_combine_eventfd_cbs = {
     .cancelled = (void (*)(ntt_epoll_event_t*, void*))ntt_combine_eventfd_cancelled,
 };
 
-int ntt_loop_run(ntt_loop_cbs_t cbs, void* ctx, unsigned width)
+unsigned ntt_loop_clamp_width(unsigned width)
 {
     if (width == 0) {
-        errno = EINVAL;
-        return -1;
+        return 1;
     }
-
-    ntt_loop_t* self = ntt_malloc(sizeof(ntt_loop_t) + sizeof(ntt_loop_worker_ctx_t) * width);
-
-    if (self == NULL) {
-        errno = ENOMEM;
-        return -1;
+    if (width > NTT_MAX_LOOP_WIDTH) {
+        return NTT_MAX_LOOP_WIDTH;
     }
+    return width;
+}
 
-    int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+int epoll_create_or_abort(int flags)
+{
+    int epoll_fd = epoll_create1(flags);
     if (epoll_fd == -1) {
-        return -1;
+        ntt_die();
     }
+    return epoll_fd;
+}
 
-    self->cbs      = cbs;
-    self->ctx      = ctx;
-    self->epoll_fd = epoll_fd;
-    pthread_mutex_init(&self->mtx, NULL);
-    pthread_cond_init(&self->cv, NULL);
+void ntt_epoll_ctl_or_die(int epfd, int op, int fd, struct epoll_event* event)
+{
+    int rc = epoll_ctl(epfd, op, fd, event);
+    if (rc == -1) {
+        ntt_die();
+    }
+}
+
+int ntt_eventfd_or_die(unsigned int count, int flags)
+{
+    int fd = eventfd(count, flags);
+    if (fd == -1) {
+        ntt_die();
+    }
+    return fd;
+}
+
+void ntt_pthread_create_or_die(
+    pthread_t* newthread,
+    const pthread_attr_t* attr,
+    void* (*start_routine)(void*),
+    void* arg)
+{
+    if (pthread_create(newthread, attr, start_routine, arg) != 0) {
+        ntt_die();
+    }
+}
+
+void ntt_pthread_mutex_init_or_die(
+    pthread_mutex_t* mutex,
+    const pthread_mutexattr_t* mutexattr)
+{
+    if (pthread_mutex_init(mutex, mutexattr) != 0) {
+        ntt_die();
+    }
+}
+
+void ntt_pthread_cond_init_or_die(
+    pthread_cond_t* cond,
+    const pthread_condattr_t* cond_attr)
+{
+    if (pthread_cond_init(cond, cond_attr) != 0) {
+        ntt_die();
+    }
+}
+
+int ntt_loop_run(ntt_task_t* task, unsigned width)
+{
+    width = ntt_loop_clamp_width(width);
+
+    ntt_loop_t* self = ntt_malloc_or_die(sizeof(ntt_loop_t) + (sizeof(ntt_loop_worker_ctx_t) * width));
+
+    self->epoll_fd = epoll_create_or_abort(EPOLL_CLOEXEC);
+    ntt_pthread_mutex_init_or_die(&self->mtx, NULL);
+    ntt_pthread_cond_init_or_die(&self->cv, NULL);
     self->enter_cnt = 0;
     self->width     = width;
     self->work_cnt  = 1;
@@ -247,52 +253,47 @@ int ntt_loop_run(ntt_loop_cbs_t cbs, void* ctx, unsigned width)
         (ntt_combine_wakeup_cb_t*)ntt_loop_combine_wakeup);
 
     int combine_eventfd_flags = EFD_CLOEXEC | EFD_NONBLOCK | EFD_SEMAPHORE;
-    self->combine_eventfd     = eventfd(0, combine_eventfd_flags);
-    if (self->combine_eventfd == -1) {
-        // TODO(vg): handle error
-        abort();
-    }
+    self->combine_eventfd     = ntt_eventfd_or_die(0, combine_eventfd_flags);
 
     ntt_epoll_event_init(&self->combine_event, &ntt_g_combine_eventfd_cbs, self, 0);
     struct epoll_event event;
     event.events   = EPOLLIN | EPOLLEXCLUSIVE;
     event.data.ptr = &self->combine_event;
-    int rc         = epoll_ctl(self->epoll_fd, EPOLL_CTL_ADD, self->combine_eventfd, &event);
-    if (rc == -1) {
-        // TODO(vg): handle error
-        abort();
-    }
+    ntt_epoll_ctl_or_die(self->epoll_fd, EPOLL_CTL_ADD, self->combine_eventfd, &event);
+
+    ntt_queue_t* queue = ntt_malloc(sizeof(ntt_queue_t));
+    ntt_queue_init(
+        queue,
+        &self->combine,
+        (ntt_queue_wakeup_cb_t*)ntt_combine_push,
+        self);
+    ntt_queue_push_task(queue, task);
+
+    // on reference captured by combine
+    ntt_queue_release(queue);
+
+    // work captured in by default
+    ntt_loop_work_leave(self);
 
     unsigned i = 0;
 
-    self->workers[i].thread_id = pthread_self();
-    self->workers[i].worker    = NULL;
     self->workers[i].loop      = self;
+    self->workers[i].worker    = NULL;
+    self->workers[i].thread_id = pthread_self();
     ++i;
 
     for (; i < width; ++i) {
         self->workers[i].loop   = self;
         self->workers[i].worker = NULL;
 
-        int rc = pthread_create(
+        ntt_pthread_create_or_die(
             &self->workers[i].thread_id,
             NULL,
             ntt_loop_follower_thread_svc,
             &self->workers[i]);
-
-        if (rc != 0) {
-            // TODO(vg): handle thread creating error
-            abort();
-        }
     }
 
-    ntt_worker_cbs_t leader_thread_cbs = {
-        .enter_cb = ntt_loop_leader_enter,
-        .svc_cb   = ntt_loop_worker_svc,
-        .leave_cb = ntt_loop_worker_leave,
-    };
-
-    ntt_worker_svc(leader_thread_cbs, &self->workers[0]);
+    ntt_worker_svc(ntt_loop_make_worker_cbs(), &self->workers[0]);
 
     for (i = 1; i < width; ++i) {
         pthread_join(self->workers[i].thread_id, NULL);
@@ -326,6 +327,10 @@ void ntt_loop_work_leave(ntt_loop_t* self)
             ntt_worker_release(self->workers[i].worker);
         }
     }
+}
+
+void ntt_loop_push_barrier(ntt_loop_t *self, ntt_task_t* task)
+{
 }
 
 // static void ntt_loop_leader_enter(void* ctx, ntt_worker_t* worker)

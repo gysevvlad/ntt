@@ -1,97 +1,71 @@
-#include "ntt/queue.h"
-#include "ntt/task.hpp"
-#include "queue.h"
-#include <chrono>
-#include <future>
+#include <ntt/loop.h>
+#include <ntt/queue.h>
+#include <ntt/task.hpp>
+
 #include <gtest/gtest.h>
 
-#include <ntt/loop.h>
+#include <cassert>
+#include <chrono>
+#include <future>
 #include <thread>
 
 TEST(LoopTest, CreateEmpty)
 {
     ntt_loop_run(
-        ntt_loop_cbs_t {
-            .on_start = [](void* ctx, ntt_queue_t* queue) { },
-        },
-        nullptr, 4);
+        ntt::make_task([] { std::cout << "Hello!" << std::endl; }),
+        4);
 }
 
 TEST(LoopTest, StartEvent)
 {
-    struct Context {
-        ntt_queue_t* from_args = nullptr;
-        ntt_queue_t* from_self = nullptr;
-    } context;
-
+    bool was = false;
     ntt_loop_run(
-        ntt_loop_cbs_t {
-            .on_start = [](void* ctx, ntt_queue_t* queue) {
-                auto& context = *static_cast<Context*>(ctx);
-
-                context.from_args = queue;
-                context.from_self = ntt_queue_self();
-            },
-        },
-        &context, 4);
-
-    ASSERT_NE(context.from_args, nullptr);
-    ASSERT_NE(context.from_self, nullptr);
-    ASSERT_EQ(context.from_args, context.from_self);
+        ntt::make_task([&] { was = true; }),
+        4);
+    ASSERT_TRUE(was);
 }
 
 TEST(LoopTest, StartSequence)
 {
     static constexpr std::size_t g_task_cnt = 16;
 
-    struct Context {
-        std::size_t cnt = 0;
-    } context;
+    std::size_t cnt = 0;
 
     ntt_loop_run(
-        ntt_loop_cbs_t {
-            .on_start = [](void* ctx, ntt_queue_t* queue) {
-                auto& context = *static_cast<Context*>(ctx);
-                for (std::size_t i = 0; i < g_task_cnt; ++i) {
-                    ntt_queue_push_task(
-                        queue,
-                        ntt::make_task([&] { context.cnt += 1; }));
-                }
-            },
-        },
-        &context, 4);
+        ntt::make_task([&] {
+            for (std::size_t i = 0; i < g_task_cnt; ++i) {
+                ntt_queue_push(
+                    ntt_queue_self(),
+                    ntt::make_task([&] { cnt += 1; }));
+            }
+        }),
+        4);
 
-    ASSERT_EQ(context.cnt, g_task_cnt);
+    ASSERT_EQ(cnt, g_task_cnt);
 }
 
 TEST(LoopTest, ExternalTasks)
 {
     static constexpr std::size_t g_task_cnt = 1'000;
 
-    struct Context {
-        std::promise<ntt_queue_t*> promise;
-    } context;
-
     std::size_t cnt = 0;
     {
-        auto future = context.promise.get_future();
+        std::promise<ntt_queue_t*> promise;
+        auto future = promise.get_future();
 
         std::jthread thread { [&] {
             ntt_loop_run(
-                ntt_loop_cbs_t {
-                    .on_start = [](void* ctx, ntt_queue_t* queue) {
-                        auto& context = *static_cast<Context*>(ctx);
-                        context.promise.set_value(ntt_queue_acquire(queue));
-                    },
-                },
-                &context, 8);
+                ntt::make_task([promise = std::move(promise)] mutable {
+                    promise.set_value(ntt_queue_acquire(ntt_queue_self()));
+                }),
+                8);
         } };
 
         auto* queue = future.get();
 
         for (std::size_t i = 0; i < g_task_cnt; ++i) {
             std::this_thread::sleep_for(std::chrono::milliseconds { 1 });
-            ntt_queue_push_task(
+            ntt_queue_push(
                 queue,
                 ntt::make_task([&] {
                     cnt += 1;

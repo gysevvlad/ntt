@@ -11,6 +11,7 @@ set(NTT_SOURCES
   src/task.c
   src/worker.c
   src/signal.c
+  src/die.c
 )
 
 set(NTT_TEST_SOURCES

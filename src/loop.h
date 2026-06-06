@@ -6,6 +6,7 @@
 #include "ntt/impl/atomic.h"
 #include "ntt/impl/epoll_event.h"
 #include "ntt/queue.h"
+#include "ntt/task.h"
 #include <ntt/loop.h>
 
 #include <pthread.h>
@@ -23,18 +24,9 @@ typedef struct ntt_loop_worker_ctx {
 } ntt_loop_worker_ctx_t;
 
 struct ntt_loop {
-    ntt_loop_cbs_t cbs;
-    void* ctx;
-
     int epoll_fd;
 
     atomic_size_t work_cnt;
-
-    // int followers_created;
-    // unsigned followers_ready;
-    // volatile sig_atomic_t got_sigint;
-    // volatile sig_atomic_t got_sighup;
-    // volatile sig_atomic_t got_sigterm;
 
     pthread_mutex_t mtx;
     pthread_cond_t cv;
@@ -54,6 +46,14 @@ void ntt_loop_destroy(ntt_loop_t* self);
 void ntt_loop_work_enter(ntt_loop_t* self);
 
 void ntt_loop_work_leave(ntt_loop_t* self);
+
+/**
+ * @brief Send barrier task to the loop.
+ *
+ * Barrier task wakes up all workers. At task execution all previously
+ * deleted fds from epoll will be drained.
+ */
+void ntt_loop_push_barrier(ntt_loop_t* self, ntt_task_t* task);
 
 // int ntt_loop_add_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event);
 

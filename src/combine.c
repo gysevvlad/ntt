@@ -6,6 +6,7 @@
 
 #include <pthread.h>
 #include <stddef.h>
+#include <assert.h>
 
 void ntt_combine_init(ntt_combine_t* self)
 {
