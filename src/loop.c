@@ -9,8 +9,10 @@
 #include "ntt/queue.h"
 #include "ntt/task.h"
 #include "queue.h"
+#include "task.h"
 
 #include <assert.h>
+#include <bits/pthreadtypes.h>
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
@@ -329,8 +331,37 @@ void ntt_loop_work_leave(ntt_loop_t* self)
     }
 }
 
-void ntt_loop_push_barrier(ntt_loop_t *self, ntt_task_t* task)
+typedef struct ntt_barrier_context {
+    ntt_task_t* task;
+    atomic_int_fast64_t refs;
+} ntt_barrier_context_t;
+
+static void ntt_barrier_svc(void* payload)
 {
+    ntt_barrier_context_t* self = *(ntt_barrier_context_t**)payload;
+
+    if (atomic_fetch_sub(&self->refs, 1) != 1) {
+        return;
+    }
+
+    ntt_task_svc(self->task);
+    ntt_task_destroy(self->task);
+    ntt_free(self);
+}
+
+void ntt_loop_push_barrier(ntt_loop_t* self, ntt_task_t* task)
+{
+    ntt_barrier_context_t* context = ntt_malloc_or_die(sizeof(ntt_barrier_context_t));
+
+    context->task = task;
+    context->refs = self->width;
+
+    unsigned i = 0;
+    for (; i < self->width; ++i) {
+        ntt_worker_push_task(
+            self->workers[i].worker,
+            ntt_task_create_with_ctx(ntt_barrier_svc, ntt_free, context));
+    }
 }
 
 // static void ntt_loop_leader_enter(void* ctx, ntt_worker_t* worker)

@@ -201,3 +201,8 @@ void ntt_queue_release(
         ntt_free(self);
     }
 }
+
+ntt_loop_t* ntt_queue_loop(ntt_queue_t* self)
+{
+    return self->loop;
+}

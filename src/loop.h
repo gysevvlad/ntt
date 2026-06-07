@@ -11,7 +11,6 @@
 
 #include <pthread.h>
 #include <signal.h>
-#include <stdatomic.h>
 
 EXTERN_START
 

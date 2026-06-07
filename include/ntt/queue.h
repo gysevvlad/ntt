@@ -5,6 +5,8 @@
 
 EXTERN_START
 
+typedef struct ntt_loop ntt_loop_t;
+
 /**
  * @brief Representing queue of serail tasks.
  */
@@ -42,5 +44,7 @@ NTT_EXPORT ntt_queue_t* ntt_queue_acquire(
 
 NTT_EXPORT void ntt_queue_release(
     ntt_queue_t* self);
+
+NTT_EXPORT ntt_loop_t* ntt_queue_loop(ntt_queue_t* self);
 
 EXTERN_STOP

@@ -2,6 +2,8 @@
 #include <ntt/queue.h>
 #include <ntt/task.hpp>
 
+#include "./loop.h"
+
 #include <gtest/gtest.h>
 
 #include <cassert>
@@ -76,4 +78,32 @@ TEST(LoopTest, ExternalTasks)
     }
 
     ASSERT_EQ(cnt, g_task_cnt);
+}
+
+TEST(LoopTest, BarrierTask)
+{
+    bool done = false;
+    {
+        std::promise<ntt_queue_t*> promise;
+        auto future = promise.get_future();
+
+        std::jthread thread { [&] {
+            ntt_loop_run(
+                ntt::make_task([promise = std::move(promise)] mutable {
+                    promise.set_value(ntt_queue_acquire(ntt_queue_self()));
+                }),
+                8);
+        } };
+
+        auto* queue = future.get();
+
+        std::this_thread::sleep_for(std::chrono::milliseconds { 1 });
+
+        ntt_loop_push_barrier(
+            ntt_queue_loop(queue),
+            ntt::make_task([&] { done = true; }));
+
+        ntt_queue_release(queue);
+    }
+    ASSERT_TRUE(done);
 }
