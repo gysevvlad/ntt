@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 

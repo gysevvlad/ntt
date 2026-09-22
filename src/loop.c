@@ -236,7 +236,7 @@ void ntt_pthread_cond_init_or_die(
     }
 }
 
-int ntt_loop_run(ntt_task_t* task, unsigned width)
+void ntt_loop_run(ntt_task_t* task, unsigned width)
 {
     width = ntt_loop_clamp_width(width);
 
@@ -303,8 +303,6 @@ int ntt_loop_run(ntt_task_t* task, unsigned width)
 
     ntt_loop_destroy(self);
     ntt_free(self);
-
-    return 0;
 }
 
 void ntt_loop_destroy(ntt_loop_t* self)
@@ -362,6 +360,34 @@ void ntt_loop_push_barrier(ntt_loop_t* self, ntt_task_t* task)
             self->workers[i].worker,
             ntt_task_create_with_ctx(ntt_barrier_svc, ntt_free, context));
     }
+}
+
+void ntt_loop_add_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event)
+{
+    struct epoll_event event;
+    event.data.ptr = epoll_event;
+    event.events   = epoll_event->events;
+
+    epoll_event->loop = self;
+    ntt_epoll_ctl_or_die(self->epoll_fd, EPOLL_CTL_ADD, epoll_event->fd, &event);
+    ntt_loop_work_enter(self);
+}
+
+static void ntt_loop_epoll_event_canceled(void* payload)
+{
+    ntt_epoll_event_t* self = *(ntt_epoll_event_t**)(payload);
+    ntt_loop_t* loop        = self->loop;
+    ntt_epoll_event_cancelled(self);
+    ntt_loop_work_leave(loop);
+}
+
+void ntt_loop_del_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event)
+{
+    ntt_epoll_ctl_or_die(self->epoll_fd, EPOLL_CTL_DEL, epoll_event->fd, NULL);
+    // ntt_task_t* task           = ntt_task_create(ntt_loop_epoll_event_canceled, NULL);
+    // *(ntt_epoll_event_t**)task = epoll_event;
+    // ntt_loop_post_barrier_task(self, task);
+    // return 0;
 }
 
 // static void ntt_loop_leader_enter(void* ctx, ntt_worker_t* worker)
@@ -677,20 +703,6 @@ void ntt_loop_push_barrier(ntt_loop_t* self, ntt_task_t* task)
 //     ntt_loop_t* loop        = self->loop;
 //     ntt_epoll_event_cancelled(self);
 //     ntt_loop_work_leave(loop);
-// }
-
-// int ntt_loop_add_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event)
-// {
-//     struct epoll_event event;
-//     event.data.ptr    = epoll_event;
-//     event.events      = epoll_event->events;
-//     epoll_event->loop = self;
-//     int rc            = epoll_ctl(self->epoll_fd, EPOLL_CTL_ADD, epoll_event->fd, &event);
-//     if (rc != 0) {
-//         return errno;
-//     }
-//     ntt_loop_work_enter(self);
-//     return 0;
 // }
 
 // int ntt_loop_del_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event)

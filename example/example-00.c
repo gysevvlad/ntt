@@ -2,18 +2,20 @@
 
 #include <stdio.h>
 
-void app_on_start(ntt_loop_t* loop, void* ctx)
+void app_on_start(void* ctx)
 {
-    printf("hello from ntt_loop!\n");
-}
-
-void ntt_got_signal(ntt_loop_t* loop, void* ctx, int signal)
-{
-    printf("got signal!\n");
+    (void)ctx;
+    printf("Hello from ntt_loop!\n");
 }
 
 int main(int argc, char* argv[])
 {
-    ntt_loop_svc(ntt_loop_cbs_make(app_on_start, ntt_got_signal), NULL, 4);
+    (void)argc;
+    (void)argv;
+
+    ntt_loop_run(
+        ntt_task_create(app_on_start),
+        1);
+
     return 0;
 }

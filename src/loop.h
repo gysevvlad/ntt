@@ -54,9 +54,9 @@ void ntt_loop_work_leave(ntt_loop_t* self);
  */
 void ntt_loop_push_barrier(ntt_loop_t* self, ntt_task_t* task);
 
-// int ntt_loop_add_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event);
+void ntt_loop_add_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event);
 
-// int ntt_loop_del_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event);
+void ntt_loop_del_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event);
 
 ntt_loop_t* ntt_loop_self();
 

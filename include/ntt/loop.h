@@ -17,6 +17,6 @@ typedef struct ntt_loop ntt_loop_t;
 /**
  * @brief Run the ntt event loop.
  */
-NTT_EXPORT int ntt_loop_run(ntt_task_t* task, unsigned width);
+NTT_EXPORT void ntt_loop_run(ntt_task_t* task, unsigned width);
 
 EXTERN_STOP

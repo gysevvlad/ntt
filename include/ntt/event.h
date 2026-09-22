@@ -1,8 +1,6 @@
 #pragma once
 
 #include "ntt/defs.h"
-#include "ntt/ec.h"
-#include "ntt/export.h"
 #include "ntt/loop.h"
 
 EXTERN_START
@@ -17,7 +15,7 @@ typedef struct ntt_event ntt_event_t;
 typedef struct ntt_event_vtbl {
     const char* name;
     void (*ntt_event_svc_cb)(ntt_event_t* self, void* ctx, ntt_interest_t interest);
-    void (*ntt_event_stopped_cb)(ntt_event_t* self, void* ctx, ntt_ec_t ec);
+    void (*ntt_event_stopped_cb)(ntt_event_t* self, void* ctx, int ec);
 } ntt_event_vtbl_t;
 
 NTT_EXPORT ntt_event_t* ntt_event_create(

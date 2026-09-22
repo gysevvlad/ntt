@@ -1,11 +1,10 @@
 #include "./event.h"
 #include "ntt/defs.h"
-#include "ntt/ec.h"
 #include "ntt/event.h"
 #include "ntt/impl/atomic.h"
 #include "ntt/impl/epoll_event.h"
-#include "ntt/impl/loop.h"
-#include "ntt/impl/malloc.h"
+#include "./loop.h"
+#include "./malloc.h"
 
 #include <sys/epoll.h>
 
@@ -26,8 +25,7 @@ static void ntt_event_svc(ntt_event_t* self)
 
 static void ntt_event_stopped(ntt_event_t* self)
 {
-    ntt_ec_t ec = ntt_make_ok_ec();
-    self->vtbl->ntt_event_stopped_cb(self, self->ctx, ec);
+    self->vtbl->ntt_event_stopped_cb(self, self->ctx, 0);
 }
 
 static void ntt_epoll_event_svc(ntt_epoll_event_t* self, void* ctx, uint32_t events)
