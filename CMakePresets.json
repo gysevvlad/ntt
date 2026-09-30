@@ -22,7 +22,7 @@
             ],
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "NTT_BUILD_TESTS": false
+                "NTT_BUILD_TESTS": true
             }
         },
         {

@@ -30,12 +30,18 @@ set(NTT_TEST_SOURCES
 find_package(Threads REQUIRED)
 
 if (NTT_BUILD_TESTS)
+  enable_testing()
+
   add_executable(ntt_unit_tests)
 
   set_target_properties(ntt_unit_tests
     PROPERTIES
+      C_STANDARD 17
       C_STANDARD_REQUIRED on
       C_EXTENSIONS on
+      CXX_STANDARD 23
+      CXX_STANDARD_REQUIRED on
+      CXX_EXTENSIONS on
       INTERPROCEDURAL_OPTIMIZATION true)
 
   target_sources(ntt_unit_tests PRIVATE ${NTT_SOURCES} ${NTT_TEST_SOURCES})
@@ -63,6 +69,7 @@ target_include_directories(ntt PUBLIC include)
 target_sources(ntt PRIVATE ${NTT_SOURCES})
 set_target_properties(ntt
   PROPERTIES
+    C_STANDARD 17
     C_STANDARD_REQUIRED on
     C_EXTENSIONS on
     C_VISIBILITY_PRESET hidden
