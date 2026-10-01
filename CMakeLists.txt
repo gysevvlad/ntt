@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 project(ntt)
 
 option(NTT_BUILD_TESTS "Build tests" ${PROJECT_IS_TOP_LEVEL})
+option(NTT_BUILD_BENCHMARKS "Build benchmarks" OFF)
 
 set(NTT_SOURCES
   src/combine.c
@@ -27,6 +28,10 @@ set(NTT_TEST_SOURCES
   src/task_test.cpp
   src/timer_heap_test.cpp
   src/worker_test.cpp
+)
+
+set(NTT_BENCHMARK_SOURCES
+  src/timer_heap_benchmark.cpp
 )
 
 find_package(Threads REQUIRED)
@@ -62,6 +67,35 @@ if (NTT_BUILD_TESTS)
       Threads::Threads)
 
   add_test(NAME ntt_unit_tests COMMAND ntt_unit_tests)
+endif()
+
+add_subdirectory(thd)
+
+if (NTT_BUILD_BENCHMARKS)
+  add_executable(ntt_benchmarks)
+
+  set_target_properties(ntt_benchmarks
+    PROPERTIES
+      C_STANDARD 17
+      C_STANDARD_REQUIRED on
+      C_EXTENSIONS on
+      CXX_STANDARD 23
+      CXX_STANDARD_REQUIRED on
+      CXX_EXTENSIONS on
+      INTERPROCEDURAL_OPTIMIZATION true)
+
+  target_sources(ntt_benchmarks PRIVATE ${NTT_SOURCES} ${NTT_BENCHMARK_SOURCES})
+
+  target_include_directories(ntt_benchmarks PUBLIC ./include)
+
+  find_package(Boost REQUIRED)
+
+  target_link_libraries(
+    ntt_benchmarks
+    PRIVATE
+      Boost::headers
+      benchmark::benchmark_main
+      Threads::Threads)
 endif()
 
 add_library(ntt SHARED)
