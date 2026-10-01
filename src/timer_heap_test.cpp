@@ -45,13 +45,15 @@ TEST_F(TimerHeapTest, Empty)
 
 TEST_F(TimerHeapTest, PushDoesNotAllocateUntilFirstTimer)
 {
-    ASSERT_EQ(heap.heap_block_cnt, 0u);
-    ASSERT_EQ(heap.slot_block_cnt, 0u);
+    ASSERT_EQ(heap.heap_cap, 0u);
+    ASSERT_EQ(heap.slot_cap, 0u);
+    ASSERT_EQ(heap.heap, nullptr);
+    ASSERT_EQ(heap.slots, nullptr);
 
     push(10, 1);
 
-    ASSERT_EQ(heap.heap_block_cnt, 1u);
-    ASSERT_EQ(heap.slot_block_cnt, 1u);
+    ASSERT_EQ(heap.heap_cap, NTT_TIMER_MIN_CAPACITY);
+    ASSERT_EQ(heap.slot_cap, NTT_TIMER_MIN_CAPACITY);
 }
 
 TEST_F(TimerHeapTest, PeekReturnsEarliest)
@@ -290,6 +292,143 @@ TEST_F(TimerHeapTest, DeinitDestroysTaskCaptures)
     ASSERT_EQ(captured.use_count(), 1);
 }
 
+TEST_F(TimerHeapTest, CancelLeavesTombstone)
+{
+    push(10, 1);
+    auto tag = push(20, 2);
+    push(30, 3);
+
+    ntt_timer_heap_cancel(&heap, tag);
+
+    // The entry is still in the array, but it is not counted as armed.
+    ASSERT_EQ(ntt_timer_heap_size(&heap), 2u);
+    ASSERT_EQ(heap.size, 3u);
+    ASSERT_EQ(heap.tombstones, 1u);
+
+    ASSERT_EQ(ntt_timer_heap_svc(&heap, UINT64_MAX), 2u);
+    ASSERT_EQ(fired, (std::vector<int> { 1, 3 }));
+    ASSERT_EQ(heap.size, 0u);
+    ASSERT_EQ(heap.tombstones, 0u);
+}
+
+TEST_F(TimerHeapTest, PeekDropsTombstonesOnTop)
+{
+    auto tag = push(10, 1);
+    push(20, 2);
+
+    ntt_timer_heap_cancel(&heap, tag);
+    ASSERT_EQ(heap.size, 2u);
+
+    std::uint64_t deadline = 0;
+    ASSERT_EQ(ntt_timer_heap_peek(&heap, &deadline), 1);
+    ASSERT_EQ(deadline, 20u);
+
+    // The tombstone was on top, so peek had to drop it.
+    ASSERT_EQ(heap.size, 1u);
+    ASSERT_EQ(heap.tombstones, 0u);
+}
+
+TEST_F(TimerHeapTest, TombstonesReclaimedInBulk)
+{
+    static constexpr int g_cnt = 1000;
+
+    std::vector<ntt_timer_tag_t> tags;
+    for (int i = 0; i < g_cnt; ++i) {
+        tags.push_back(push(static_cast<std::uint64_t>(i + 1) * 10, i));
+    }
+
+    // Cancel every second timer: that is exactly half, below the threshold.
+    for (int i = 0; i < g_cnt; i += 2) {
+        ntt_timer_heap_cancel(&heap, tags[i]);
+    }
+    ASSERT_EQ(ntt_timer_heap_size(&heap), g_cnt / 2);
+
+    // One more cancel tips it over and the heap is rebuilt.
+    ntt_timer_heap_cancel(&heap, tags[1]);
+
+    ASSERT_EQ(heap.tombstones, 0u);
+    ASSERT_EQ(heap.size, (g_cnt / 2) - 1);
+    ASSERT_EQ(ntt_timer_heap_size(&heap), (g_cnt / 2) - 1);
+
+    // What is left still fires in order.
+    ASSERT_EQ(ntt_timer_heap_svc(&heap, UINT64_MAX), static_cast<std::size_t>((g_cnt / 2) - 1));
+    std::vector<int> expected;
+    for (int i = 3; i < g_cnt; i += 2) {
+        expected.push_back(i);
+    }
+    ASSERT_EQ(fired, expected);
+}
+
+TEST_F(TimerHeapTest, SlotReusedWhileTombstoneRemains)
+{
+    auto tag = push(100, 1);
+    push(300, 3);
+
+    ntt_timer_heap_cancel(&heap, tag);
+
+    // The freed slot is handed to the next timer, so the tombstone and the
+    // new timer share a slab index and differ only in version.
+    auto reused = push(200, 2);
+    ASSERT_EQ(reused.index, tag.index);
+    ASSERT_NE(reused.version, tag.version);
+
+    ASSERT_EQ(ntt_timer_heap_svc(&heap, UINT64_MAX), 2u);
+    ASSERT_EQ(fired, (std::vector<int> { 2, 3 }));
+}
+
+TEST_F(TimerHeapTest, ReusedSlotEarlierThanTombstone)
+{
+    auto tag = push(100, 1);
+    push(300, 3);
+
+    ntt_timer_heap_cancel(&heap, tag);
+
+    // The new timer takes the same slot but must fire before everything else.
+    push(50, 2);
+
+    ASSERT_EQ(ntt_timer_heap_svc(&heap, UINT64_MAX), 2u);
+    ASSERT_EQ(fired, (std::vector<int> { 2, 3 }));
+}
+
+TEST_F(TimerHeapTest, ReusedSlotKeepsOrderingOfEqualDeadlines)
+{
+    // A tombstone keeps the sequence number it was pushed with. If it were
+    // read back from the reused slot instead, the order of equal deadlines
+    // would silently change.
+    auto tag = push(100, 1);
+    ntt_timer_heap_cancel(&heap, tag);
+
+    push(100, 2);
+    push(100, 3);
+    push(100, 4);
+
+    ASSERT_EQ(ntt_timer_heap_svc(&heap, 100), 3u);
+    ASSERT_EQ(fired, (std::vector<int> { 2, 3, 4 }));
+}
+
+TEST_F(TimerHeapTest, CancelAllThenArmAgain)
+{
+    std::vector<ntt_timer_tag_t> tags;
+    for (int i = 0; i < 64; ++i) {
+        tags.push_back(push(static_cast<std::uint64_t>(i + 1) * 10, i));
+    }
+    for (auto tag : tags) {
+        ntt_timer_heap_cancel(&heap, tag);
+    }
+
+    ASSERT_EQ(ntt_timer_heap_empty(&heap), 1);
+    ASSERT_EQ(ntt_timer_heap_svc(&heap, UINT64_MAX), 0u);
+    ASSERT_TRUE(fired.empty());
+
+    for (int i = 0; i < 8; ++i) {
+        push(static_cast<std::uint64_t>(100 - i), 100 + i);
+    }
+
+    ASSERT_EQ(ntt_timer_heap_size(&heap), 8u);
+    ASSERT_EQ(ntt_timer_heap_svc(&heap, UINT64_MAX), 8u);
+    ASSERT_EQ(fired, (std::vector<int> { 107, 106, 105, 104, 103, 102, 101, 100 }));
+}
+
 TEST_F(TimerHeapTest, StaleTagAfterFireIsIgnored)
 {
     auto tag = push(10, 1);
@@ -369,17 +508,16 @@ TEST_F(TimerHeapTest, TaskArmingLaterTimerLeavesItArmed)
     ASSERT_EQ(deadline, 500u);
 }
 
-TEST_F(TimerHeapTest, GrowsAndShrinksBlocks)
+TEST_F(TimerHeapTest, GrowsAndShrinksCapacity)
 {
-    static constexpr int g_cnt = NTT_TIMER_BLOCK * 3 + 7;
+    static constexpr int g_cnt = (NTT_TIMER_MIN_CAPACITY * 4) + 7;
 
     for (int i = 0; i < g_cnt; ++i) {
         push(static_cast<std::uint64_t>(g_cnt - i), i);
     }
 
-    const std::uint32_t blocks = (g_cnt + NTT_TIMER_BLOCK - 1) / NTT_TIMER_BLOCK;
-    ASSERT_EQ(heap.heap_block_cnt, blocks);
-    ASSERT_EQ(heap.slot_block_cnt, blocks);
+    ASSERT_GE(heap.heap_cap, static_cast<std::uint32_t>(g_cnt));
+    ASSERT_GE(heap.slot_cap, static_cast<std::uint32_t>(g_cnt));
 
     ASSERT_EQ(ntt_timer_heap_svc(&heap, UINT64_MAX), static_cast<std::size_t>(g_cnt));
 
@@ -388,9 +526,10 @@ TEST_F(TimerHeapTest, GrowsAndShrinksBlocks)
     std::reverse(expected.begin(), expected.end());
     ASSERT_EQ(fired, expected);
 
-    // one spare heap block is kept, the slab keeps its watermark
-    ASSERT_EQ(heap.heap_block_cnt, 1u);
-    ASSERT_EQ(heap.slot_block_cnt, blocks);
+    // The heap gave its capacity back, the slab keeps its watermark because
+    // slot indices are handles.
+    ASSERT_EQ(heap.heap_cap, NTT_TIMER_MIN_CAPACITY);
+    ASSERT_GE(heap.slot_cap, static_cast<std::uint32_t>(g_cnt));
 }
 
 TEST_F(TimerHeapTest, DeinitDestroysArmedTasks)

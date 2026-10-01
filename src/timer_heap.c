@@ -7,18 +7,16 @@
 #include <stdint.h>
 
 #if UINTPTR_MAX == 0xffffffffffffffffULL
-NTT_STATIC_ASSERT(sizeof(ntt_timer_heap_elem_t) == 16, "unexpected heap entry layout");
-NTT_STATIC_ASSERT(sizeof(ntt_timer_slot_t) == 24, "unexpected slab entry layout");
+NTT_STATIC_ASSERT(sizeof(ntt_timer_heap_elem_t) == 24, "unexpected heap entry layout");
+NTT_STATIC_ASSERT(sizeof(ntt_timer_slot_t) == 16, "unexpected slab entry layout");
 #endif
-
-#define NTT_TIMER_BLOCK_TABLE_MIN 4
 
 static inline ntt_timer_heap_elem_t* ntt_timer_heap_elem_at(
     const ntt_timer_heap_t* self,
     uint32_t pos)
 {
     assert(pos < self->size);
-    return &self->heap_blocks[pos / NTT_TIMER_BLOCK][pos % NTT_TIMER_BLOCK];
+    return &self->heap[pos];
 }
 
 static inline ntt_timer_slot_t* ntt_timer_heap_slot_at(
@@ -26,41 +24,48 @@ static inline ntt_timer_slot_t* ntt_timer_heap_slot_at(
     uint32_t index)
 {
     assert(index < self->slot_cnt);
-    return &self->slot_blocks[index / NTT_TIMER_BLOCK][index % NTT_TIMER_BLOCK];
+    return &self->slots[index];
 }
 
 /**
  * @brief Compare two heap entries.
  *
- * Orders by deadline and breaks ties by sequence number, which keeps the
- * heap stable. The slab is touched only when the deadlines are equal.
+ * Orders by deadline and breaks ties by sequence number, which keeps the heap
+ * stable. Both live in the entry, so sifting never reads the slab.
  *
  * @return Returns 1 if lhs must fire before rhs, otherwise 0.
  */
 static inline int ntt_timer_heap_less(
-    const ntt_timer_heap_t* self,
     const ntt_timer_heap_elem_t* lhs,
     const ntt_timer_heap_elem_t* rhs)
 {
     if (lhs->deadline != rhs->deadline) {
         return lhs->deadline < rhs->deadline ? 1 : 0;
     }
-    return ntt_timer_heap_slot_at(self, lhs->index)->seq
-            < ntt_timer_heap_slot_at(self, rhs->index)->seq
-        ? 1
-        : 0;
+    return lhs->seq < rhs->seq ? 1 : 0;
 }
 
 /**
- * @brief Write an entry at the given position and fix up its back reference.
+ * @brief Check that an entry still refers to the timer that pushed it.
+ *
+ * @return Returns 1 for a live entry and 0 for a tombstone.
+ */
+static inline int ntt_timer_heap_elem_live(
+    const ntt_timer_heap_t* self,
+    const ntt_timer_heap_elem_t* elem)
+{
+    return ntt_timer_heap_slot_at(self, elem->index)->version == elem->version ? 1 : 0;
+}
+
+/**
+ * @brief Write an entry at the given position.
  */
 static inline void ntt_timer_heap_place(
     ntt_timer_heap_t* self,
     uint32_t pos,
     ntt_timer_heap_elem_t elem)
 {
-    *ntt_timer_heap_elem_at(self, pos)               = elem;
-    ntt_timer_heap_slot_at(self, elem.index)->heap_pos = pos;
+    *ntt_timer_heap_elem_at(self, pos) = elem;
 }
 
 static void ntt_timer_heap_sift_up(
@@ -72,7 +77,7 @@ static void ntt_timer_heap_sift_up(
         uint32_t parent                = (pos - 1) / 2;
         ntt_timer_heap_elem_t parent_elem = *ntt_timer_heap_elem_at(self, parent);
 
-        if (!ntt_timer_heap_less(self, &elem, &parent_elem)) {
+        if (!ntt_timer_heap_less(&elem, &parent_elem)) {
             break;
         }
 
@@ -100,7 +105,6 @@ static void ntt_timer_heap_sift_down(
 
         if (right < self->size
             && ntt_timer_heap_less(
-                self,
                 ntt_timer_heap_elem_at(self, right),
                 ntt_timer_heap_elem_at(self, left))) {
             child = right;
@@ -108,7 +112,7 @@ static void ntt_timer_heap_sift_down(
 
         ntt_timer_heap_elem_t child_elem = *ntt_timer_heap_elem_at(self, child);
 
-        if (!ntt_timer_heap_less(self, &child_elem, &elem)) {
+        if (!ntt_timer_heap_less(&child_elem, &elem)) {
             break;
         }
 
@@ -120,89 +124,76 @@ static void ntt_timer_heap_sift_down(
 }
 
 /**
- * @brief Grow a block table so that it can hold cnt block pointers.
+ * @brief Pick the next capacity that can hold cnt entries.
  */
-static void* ntt_timer_heap_grow_table(
-    void* blocks,
-    uint32_t* cap,
-    uint32_t cnt)
+static uint32_t ntt_timer_heap_grow_capacity(uint32_t cap, uint32_t cnt)
 {
-    if (cnt <= *cap) {
-        return blocks;
-    }
+    uint32_t new_cap = cap == 0 ? NTT_TIMER_MIN_CAPACITY : cap;
 
-    uint32_t new_cap = *cap == 0 ? NTT_TIMER_BLOCK_TABLE_MIN : *cap;
     while (new_cap < cnt) {
         new_cap *= 2;
     }
 
-    *cap = new_cap;
-
-    return ntt_realloc_or_die(blocks, sizeof(void*) * new_cap);
+    return new_cap;
 }
 
 /**
- * @brief Make sure the heap has a block for the given position.
+ * @brief Make sure the heap can hold an entry at the given position.
  */
 static void ntt_timer_heap_reserve_elem(ntt_timer_heap_t* self, uint32_t pos)
 {
-    uint32_t block = pos / NTT_TIMER_BLOCK;
-
-    if (block < self->heap_block_cnt) {
+    if (pos < self->heap_cap) {
         return;
     }
 
-    self->heap_blocks = (ntt_timer_heap_elem_t**)ntt_timer_heap_grow_table(
-        (void*)self->heap_blocks,
-        &self->heap_block_cap,
-        block + 1);
+    uint32_t new_cap = ntt_timer_heap_grow_capacity(self->heap_cap, pos + 1);
 
-    while (self->heap_block_cnt <= block) {
-        self->heap_blocks[self->heap_block_cnt] = ntt_malloc_or_die(
-            sizeof(ntt_timer_heap_elem_t) * NTT_TIMER_BLOCK);
-        self->heap_block_cnt += 1;
-    }
+    self->heap = ntt_realloc_or_die(
+        self->heap,
+        sizeof(ntt_timer_heap_elem_t) * new_cap);
+    self->heap_cap = new_cap;
 }
 
 /**
- * @brief Make sure the slab has a block for the given slot index.
+ * @brief Make sure the slab can hold the given slot index.
  */
 static void ntt_timer_heap_reserve_slot(ntt_timer_heap_t* self, uint32_t index)
 {
-    uint32_t block = index / NTT_TIMER_BLOCK;
-
-    if (block < self->slot_block_cnt) {
+    if (index < self->slot_cap) {
         return;
     }
 
-    self->slot_blocks = (ntt_timer_slot_t**)ntt_timer_heap_grow_table(
-        (void*)self->slot_blocks,
-        &self->slot_block_cap,
-        block + 1);
+    uint32_t new_cap = ntt_timer_heap_grow_capacity(self->slot_cap, index + 1);
 
-    while (self->slot_block_cnt <= block) {
-        self->slot_blocks[self->slot_block_cnt] = ntt_malloc_or_die(
-            sizeof(ntt_timer_slot_t) * NTT_TIMER_BLOCK);
-        self->slot_block_cnt += 1;
-    }
+    self->slots = ntt_realloc_or_die(
+        self->slots,
+        sizeof(ntt_timer_slot_t) * new_cap);
+    self->slot_cap = new_cap;
 }
 
 /**
- * @brief Release heap blocks that are no longer needed.
+ * @brief Give back heap capacity that is no longer needed.
  *
- * Keeps one spare block so that pushes and pops around a block boundary do
- * not allocate and free on every call. The slab is never shrunk: slot
- * indices are handles, so its entries cannot be moved.
+ * Halves the array only once it is three quarters empty, so that pushes and
+ * pops around the boundary do not reallocate on every call. The slab is never
+ * shrunk: slot indices are handles, so its entries cannot be moved.
  */
 static void ntt_timer_heap_shrink(ntt_timer_heap_t* self)
 {
-    uint32_t used   = (self->size + NTT_TIMER_BLOCK - 1) / NTT_TIMER_BLOCK;
-    uint32_t target = used + 1;
-
-    while (self->heap_block_cnt > target) {
-        self->heap_block_cnt -= 1;
-        ntt_free(self->heap_blocks[self->heap_block_cnt]);
+    if (self->heap_cap <= NTT_TIMER_MIN_CAPACITY) {
+        return;
     }
+
+    if (self->size * 4 > self->heap_cap) {
+        return;
+    }
+
+    uint32_t new_cap = self->heap_cap / 2;
+
+    self->heap = ntt_realloc_or_die(
+        self->heap,
+        sizeof(ntt_timer_heap_elem_t) * new_cap);
+    self->heap_cap = new_cap;
 }
 
 static uint32_t ntt_timer_heap_alloc_slot(ntt_timer_heap_t* self)
@@ -211,7 +202,7 @@ static uint32_t ntt_timer_heap_alloc_slot(ntt_timer_heap_t* self)
         uint32_t index = self->free_head;
 
         ntt_timer_slot_t* slot = ntt_timer_heap_slot_at(self, index);
-        self->free_head        = slot->heap_pos;
+        self->free_head        = slot->next_free;
 
         // vacant (even) -> occupied (odd)
         slot->version += 1;
@@ -240,37 +231,77 @@ static void ntt_timer_heap_free_slot(ntt_timer_heap_t* self, uint32_t index)
     slot->version += 1;
     assert((slot->version & 1u) == 0u);
 
-    slot->heap_pos  = self->free_head;
+    slot->next_free = self->free_head;
     self->free_head = index;
 }
 
 /**
- * @brief Take the entry at the given position out of the heap.
- *
- * Neither releases the slot nor touches the task.
+ * @brief Drop the root entry of the heap.
  */
-static void ntt_timer_heap_remove_at(ntt_timer_heap_t* self, uint32_t pos)
+static void ntt_timer_heap_pop_root(ntt_timer_heap_t* self)
 {
-    assert(pos < self->size);
+    assert(self->size > 0);
 
     uint32_t last = self->size - 1;
 
-    if (pos != last) {
-        ntt_timer_heap_elem_t elem = *ntt_timer_heap_elem_at(self, last);
+    if (last == 0) {
+        self->size = 0;
+        ntt_timer_heap_shrink(self);
+        return;
+    }
 
-        self->size = last;
+    ntt_timer_heap_elem_t elem = *ntt_timer_heap_elem_at(self, last);
 
-        if (pos > 0
-            && ntt_timer_heap_less(
-                self,
-                &elem,
-                ntt_timer_heap_elem_at(self, (pos - 1) / 2))) {
-            ntt_timer_heap_sift_up(self, pos, elem);
-        } else {
-            ntt_timer_heap_sift_down(self, pos, elem);
+    self->size = last;
+    ntt_timer_heap_sift_down(self, 0, elem);
+
+    ntt_timer_heap_shrink(self);
+}
+
+/**
+ * @brief Drop the tombstones that sit on top of the heap.
+ */
+static void ntt_timer_heap_drop_dead_root(ntt_timer_heap_t* self)
+{
+    while (self->size > 0
+        && !ntt_timer_heap_elem_live(self, ntt_timer_heap_elem_at(self, 0))) {
+        ntt_timer_heap_pop_root(self);
+        assert(self->tombstones > 0);
+        self->tombstones -= 1;
+    }
+}
+
+/**
+ * @brief Reclaim tombstones in bulk once they take over half of the heap.
+ *
+ * Filters them out in place and rebuilds the heap with Floyd in O(n), which
+ * is cheaper per tombstone than popping them one at a time at O(log n).
+ */
+static void ntt_timer_heap_compact(ntt_timer_heap_t* self)
+{
+    if (self->tombstones * 2 <= self->size) {
+        return;
+    }
+
+    uint32_t out = 0;
+    uint32_t pos = 0;
+    for (; pos < self->size; ++pos) {
+        ntt_timer_heap_elem_t elem = *ntt_timer_heap_elem_at(self, pos);
+        if (ntt_timer_heap_elem_live(self, &elem)) {
+            // size is only shrunk afterwards, so writing below pos is safe
+            *ntt_timer_heap_elem_at(self, out) = elem;
+            out += 1;
         }
-    } else {
-        self->size = last;
+    }
+
+    self->size       = out;
+    self->tombstones = 0;
+
+    if (self->size > 1) {
+        uint32_t i = self->size / 2;
+        while (i-- > 0) {
+            ntt_timer_heap_sift_down(self, i, *ntt_timer_heap_elem_at(self, i));
+        }
     }
 
     ntt_timer_heap_shrink(self);
@@ -278,16 +309,15 @@ static void ntt_timer_heap_remove_at(ntt_timer_heap_t* self, uint32_t pos)
 
 void ntt_timer_heap_init(ntt_timer_heap_t* self)
 {
-    self->heap_blocks    = NULL;
-    self->heap_block_cnt = 0;
-    self->heap_block_cap = 0;
+    self->heap     = NULL;
+    self->heap_cap = 0;
 
-    self->slot_blocks    = NULL;
-    self->slot_block_cnt = 0;
-    self->slot_block_cap = 0;
+    self->slots    = NULL;
+    self->slot_cap = 0;
 
-    self->size      = 0;
-    self->slot_cnt  = 0;
+    self->size       = 0;
+    self->tombstones = 0;
+    self->slot_cnt   = 0;
     self->free_head = NTT_TIMER_SLOT_NONE;
     self->seq_next  = 0;
 }
@@ -297,26 +327,23 @@ void ntt_timer_heap_deinit(ntt_timer_heap_t* self)
     uint32_t pos = 0;
     for (; pos < self->size; ++pos) {
         ntt_timer_heap_elem_t* elem = ntt_timer_heap_elem_at(self, pos);
-        ntt_task_destroy_inl(ntt_timer_heap_slot_at(self, elem->index)->task);
+        if (ntt_timer_heap_elem_live(self, elem)) {
+            ntt_task_destroy_inl(ntt_timer_heap_slot_at(self, elem->index)->task);
+        }
     }
-    self->size = 0;
+    self->size       = 0;
+    self->tombstones = 0;
 
-    uint32_t block = 0;
-    for (block = 0; block < self->heap_block_cnt; ++block) {
-        ntt_free(self->heap_blocks[block]);
-    }
-    for (block = 0; block < self->slot_block_cnt; ++block) {
-        ntt_free(self->slot_blocks[block]);
-    }
-
-    ntt_free((void*)self->heap_blocks);
-    ntt_free((void*)self->slot_blocks);
+    ntt_free(self->heap);
+    ntt_free(self->slots);
 
     ntt_timer_heap_init(self);
 }
 
-int ntt_timer_heap_peek(const ntt_timer_heap_t* self, uint64_t* deadline)
+int ntt_timer_heap_peek(ntt_timer_heap_t* self, uint64_t* deadline)
 {
+    ntt_timer_heap_drop_dead_root(self);
+
     if (self->size == 0) {
         return 0;
     }
@@ -338,8 +365,6 @@ ntt_timer_tag_t ntt_timer_heap_push(
 
     ntt_timer_slot_t* slot = ntt_timer_heap_slot_at(self, index);
     slot->task             = task;
-    slot->seq              = self->seq_next;
-    self->seq_next += 1;
 
     uint32_t pos = self->size;
     ntt_timer_heap_reserve_elem(self, pos);
@@ -347,14 +372,16 @@ ntt_timer_tag_t ntt_timer_heap_push(
 
     ntt_timer_heap_elem_t elem;
     elem.deadline = deadline;
+    elem.seq      = self->seq_next;
     elem.index    = index;
-    elem.reserved = 0;
+    elem.version  = slot->version;
+    self->seq_next += 1;
 
     ntt_timer_heap_sift_up(self, pos, elem);
 
     ntt_timer_tag_t tag;
     tag.index   = index;
-    tag.version = slot->version;
+    tag.version = elem.version;
 
     return tag;
 }
@@ -379,12 +406,14 @@ void ntt_timer_heap_cancel(ntt_timer_heap_t* self, ntt_timer_tag_t tag)
     }
 
     ntt_task_t* task = slot->task;
-    uint32_t pos     = slot->heap_pos;
 
-    ntt_timer_heap_remove_at(self, pos);
+    // The entry is left in the heap as a tombstone and reclaimed later.
     ntt_timer_heap_free_slot(self, tag.index);
+    self->tombstones += 1;
 
     ntt_task_destroy_inl(task);
+
+    ntt_timer_heap_compact(self);
 }
 
 size_t ntt_timer_heap_svc(ntt_timer_heap_t* self, uint64_t now)
@@ -396,19 +425,24 @@ size_t ntt_timer_heap_svc(ntt_timer_heap_t* self, uint64_t now)
             break;
         }
 
-        ntt_timer_heap_elem_t* top = ntt_timer_heap_elem_at(self, 0);
+        ntt_timer_heap_elem_t elem = *ntt_timer_heap_elem_at(self, 0);
 
-        if (top->deadline > now) {
+        if (elem.deadline > now) {
             break;
         }
 
-        uint32_t index   = top->index;
-        ntt_task_t* task = ntt_timer_heap_slot_at(self, index)->task;
+        ntt_timer_heap_pop_root(self);
+
+        if (!ntt_timer_heap_elem_live(self, &elem)) {
+            assert(self->tombstones > 0);
+            self->tombstones -= 1;
+            continue;
+        }
 
         // The timer is retired before its task runs, so the task is free to
         // arm new timers and to cancel other armed ones.
-        ntt_timer_heap_remove_at(self, 0);
-        ntt_timer_heap_free_slot(self, index);
+        ntt_task_t* task = ntt_timer_heap_slot_at(self, elem.index)->task;
+        ntt_timer_heap_free_slot(self, elem.index);
 
         ntt_task_svc_inl(task);
         ntt_task_destroy_inl(task);

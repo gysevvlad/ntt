@@ -9,18 +9,21 @@ EXTERN_START
 #include <stdint.h>
 
 /**
- * @brief Number of entries in one timer storage block.
+ * @brief Capacity the heap and the slab start with.
  *
- * Both the heap and the slab grow by whole blocks, so entries are never
- * moved by a reallocation. Must be a power of two.
+ * Both are flat arrays that double on growth. Entries are addressed by index,
+ * so a reallocation that moves an array is harmless: a tag stays valid.
+ *
+ * A queue usually has a handful of timers armed, and there may be a lot of
+ * queues, so the initial capacity is small and growth is amortized.
  */
-#ifndef NTT_TIMER_BLOCK
-#define NTT_TIMER_BLOCK 1024
+#ifndef NTT_TIMER_MIN_CAPACITY
+#define NTT_TIMER_MIN_CAPACITY 8
 #endif
 
 NTT_STATIC_ASSERT(
-    NTT_TIMER_BLOCK > 0 && (NTT_TIMER_BLOCK & (NTT_TIMER_BLOCK - 1)) == 0,
-    "ntt exception: NTT_TIMER_BLOCK must be a power of two");
+    NTT_TIMER_MIN_CAPACITY > 0,
+    "ntt exception: NTT_TIMER_MIN_CAPACITY must be positive");
 
 /**
  * @brief Sentinel for an absent slot index.
@@ -42,29 +45,41 @@ typedef struct ntt_timer_tag {
 /**
  * @brief Heap entry.
  *
- * The deadline is kept inline so that sifting compares contiguous memory.
+ * Carries everything that sifting and the liveness check need, so that moving
+ * an entry never touches the slab:
+ *
+ *  - the deadline and the sequence number are the sort key, kept inline so
+ *    that sifting compares contiguous memory;
+ *  - the version is the one the slot had when the entry was pushed. A slot is
+ *    reused by a later timer and its version moves on, so comparing the two
+ *    tells a live entry from a tombstone.
+ *
+ * The sequence number has to live here rather than in the slot: reading it
+ * from a reused slot would silently change the sort key of a tombstone and
+ * could leave a live entry stuck below it.
  */
 typedef struct ntt_timer_heap_elem {
     uint64_t deadline;
+    uint64_t seq;
     uint32_t index;
-    uint32_t reserved;
+    uint32_t version;
 } ntt_timer_heap_elem_t;
 
 /**
  * @brief Slab entry.
  *
- * While occupied it holds the task, its sequence number and its position in
- * the heap. While vacant the heap_pos field links the free list.
+ * While occupied it holds the task. While vacant the next_free field links
+ * the free list.
  *
  * The version is odd while the slot is occupied and even while it is vacant,
  * so parity alone tells the two states apart. It is bumped on every release,
- * which makes a stale tag detectable.
+ * which both makes a stale tag detectable and turns the heap entries that
+ * still point here into tombstones.
  */
 typedef struct ntt_timer_slot {
     ntt_task_t* task;
-    uint64_t seq;
-    uint32_t heap_pos;
     uint32_t version;
+    uint32_t next_free;
 } ntt_timer_slot_t;
 
 /**
@@ -74,20 +89,27 @@ typedef struct ntt_timer_slot {
  * slots. Ordering is stable: timers with equal deadlines fire in the order
  * they were started.
  *
+ * Cancellation is lazy. It releases the slot and bumps its version, which
+ * costs O(1) and does not touch the heap at all; the entry that is left
+ * behind becomes a tombstone. Tombstones are dropped when they reach the top,
+ * and once they take over half of the heap it is filtered and rebuilt in
+ * O(n), which is cheaper per tombstone than popping them one at a time.
+ *
  * The structure is not thread safe by design. All operations are expected to
  * run in the serial context of the owning queue.
  */
 typedef struct ntt_timer_heap {
-    ntt_timer_heap_elem_t** heap_blocks;
-    uint32_t heap_block_cnt;
-    uint32_t heap_block_cap;
+    ntt_timer_heap_elem_t* heap;
+    uint32_t heap_cap;
 
-    ntt_timer_slot_t** slot_blocks;
-    uint32_t slot_block_cnt;
-    uint32_t slot_block_cap;
+    ntt_timer_slot_t* slots;
+    uint32_t slot_cap;
 
-    /** Number of entries in the heap. */
+    /** Number of entries in the heap, tombstones included. */
     uint32_t size;
+
+    /** Number of tombstones among them. */
+    uint32_t tombstones;
 
     /** Number of slots ever handed out, i.e. the slab watermark. */
     uint32_t slot_cnt;
@@ -121,7 +143,7 @@ static inline int ntt_timer_tag_is_null(ntt_timer_tag_t tag)
 /**
  * @brief Initialize an empty timer heap.
  *
- * Does not allocate. The first pushed timer allocates one block of each kind.
+ * Does not allocate. The first pushed timer allocates both arrays.
  */
 void ntt_timer_heap_init(ntt_timer_heap_t* self);
 
@@ -133,11 +155,11 @@ void ntt_timer_heap_init(ntt_timer_heap_t* self);
 void ntt_timer_heap_deinit(ntt_timer_heap_t* self);
 
 /**
- * @brief Number of armed timers.
+ * @brief Number of armed timers, tombstones excluded.
  */
 static inline size_t ntt_timer_heap_size(const ntt_timer_heap_t* self)
 {
-    return self->size;
+    return self->size - self->tombstones;
 }
 
 /**
@@ -147,7 +169,7 @@ static inline size_t ntt_timer_heap_size(const ntt_timer_heap_t* self)
  */
 static inline int ntt_timer_heap_empty(const ntt_timer_heap_t* self)
 {
-    return self->size == 0 ? 1 : 0;
+    return self->size == self->tombstones ? 1 : 0;
 }
 
 /**
@@ -157,8 +179,11 @@ static inline int ntt_timer_heap_empty(const ntt_timer_heap_t* self)
  *                      empty, left untouched otherwise.
  *
  * @return Returns 1 if a deadline was written, otherwise 0.
+ *
+ * @note Not a read only operation: tombstones sitting on top are dropped
+ *       first, so the call is amortized rather than constant time.
  */
-int ntt_timer_heap_peek(const ntt_timer_heap_t* self, uint64_t* deadline);
+int ntt_timer_heap_peek(ntt_timer_heap_t* self, uint64_t* deadline);
 
 /**
  * @brief Arm a timer.
@@ -179,8 +204,9 @@ ntt_timer_tag_t ntt_timer_heap_push(
 /**
  * @brief Cancel an armed timer.
  *
- * Destroys the task of the timer without running it. After the call the
- * timer cannot fire.
+ * Destroys the task of the timer without running it and releases its slot,
+ * which costs O(1). The entry stays in the heap as a tombstone and is
+ * reclaimed later. After the call the timer cannot fire.
  *
  * @pre The tag was returned by ntt_timer_heap_push of this heap.
  * @pre The timer has neither fired nor been cancelled before.
