@@ -2,9 +2,14 @@
 
 #include <stdio.h>
 
-void app_on_start(void* ctx)
+void app_on_start(void* ctx, ntt_task_action_t action)
 {
     (void)ctx;
+
+    if (action != NTT_TASK_RUN) {
+        return;
+    }
+
     printf("Hello from ntt_loop!\n");
 }
 

@@ -79,12 +79,13 @@ static inline int ntt_task_is_null(ntt_task_t* task)
 static inline void ntt_task_svc_inl(ntt_task_t* task)
 {
     ntt_task_node_t* task_node = ntt_container_of(task, ntt_task_node_t, payload);
-    task_node->task_cb(&task_node->payload);
+    task_node->task_cb(&task_node->payload, NTT_TASK_RUN);
 }
 
 static inline void ntt_task_destroy_inl(ntt_task_t* task)
 {
     ntt_task_node_t* task_node = ntt_container_of(task, ntt_task_node_t, payload);
+    task_node->task_cb(&task_node->payload, NTT_TASK_DROP);
     task_node->free_cb(task_node);
 }
 

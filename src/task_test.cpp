@@ -12,7 +12,10 @@ TEST_F(TaskTest, RawTask)
 {
     int v     = 0;
     auto task = ntt_task_create(
-        +[](void* payload) {
+        +[](void* payload, ntt_task_action_t action) {
+            if (action != NTT_TASK_RUN) {
+                return;
+            }
             **static_cast<int**>(payload) = 1234;
         });
     *static_cast<int**>(task) = &v;
@@ -39,6 +42,68 @@ TEST_F(TaskTest, DoTask)
     ntt_task_svc(task);
     ntt_task_destroy(task);
     EXPECT_EQ(v, 1);
+}
+
+namespace {
+
+struct Tracer {
+    static int alive;
+    Tracer() { alive += 1; }
+    Tracer(const Tracer&) { alive += 1; }
+    Tracer(Tracer&&) noexcept { alive += 1; }
+    ~Tracer() { alive -= 1; }
+};
+
+int Tracer::alive = 0;
+
+} // namespace
+
+TEST_F(TaskTest, RunDestroysPayloadOnDestroy)
+{
+    Tracer::alive = 0;
+
+    bool ran = false;
+    {
+        Tracer tracer;
+        auto* task = ntt::make_task([tracer, &ran] {
+            (void)tracer;
+            ran = true;
+        });
+
+        ASSERT_EQ(Tracer::alive, 2); // the local one and the captured copy
+
+        ntt_task_svc(task);
+        ASSERT_TRUE(ran);
+        ASSERT_EQ(Tracer::alive, 2); // svc does not destroy the payload
+
+        ntt_task_destroy(task);
+        ASSERT_EQ(Tracer::alive, 1); // only the local one is left
+    }
+
+    ASSERT_EQ(Tracer::alive, 0);
+}
+
+TEST_F(TaskTest, DestroyWithoutRunDestroysPayload)
+{
+    Tracer::alive = 0;
+
+    bool ran = false;
+    {
+        Tracer tracer;
+        auto* task = ntt::make_task([tracer, &ran] {
+            (void)tracer;
+            ran = true;
+        });
+
+        ASSERT_EQ(Tracer::alive, 2);
+
+        ntt_task_destroy(task);
+
+        ASSERT_FALSE(ran);
+        ASSERT_EQ(Tracer::alive, 1);
+    }
+
+    ASSERT_EQ(Tracer::alive, 0);
 }
 
 template <class T>

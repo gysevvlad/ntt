@@ -334,8 +334,14 @@ typedef struct ntt_barrier_context {
     atomic_int_fast64_t refs;
 } ntt_barrier_context_t;
 
-static void ntt_barrier_svc(void* payload)
+static void ntt_barrier_svc(void* payload, ntt_task_action_t action)
 {
+    if (action != NTT_TASK_RUN) {
+        // The context is owned by the last worker that runs the task, so a
+        // dropped barrier task must not touch it.
+        return;
+    }
+
     ntt_barrier_context_t* self = *(ntt_barrier_context_t**)payload;
 
     if (atomic_fetch_sub(&self->refs, 1) != 1) {
@@ -373,8 +379,12 @@ void ntt_loop_add_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event)
     ntt_loop_work_enter(self);
 }
 
-static void ntt_loop_epoll_event_canceled(void* payload)
+static void ntt_loop_epoll_event_canceled(void* payload, ntt_task_action_t action)
 {
+    if (action != NTT_TASK_RUN) {
+        return;
+    }
+
     ntt_epoll_event_t* self = *(ntt_epoll_event_t**)(payload);
     ntt_loop_t* loop        = self->loop;
     ntt_epoll_event_cancelled(self);

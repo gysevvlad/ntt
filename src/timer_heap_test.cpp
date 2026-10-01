@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <numeric>
+#include <memory>
 #include <random>
 #include <vector>
 
@@ -224,7 +225,9 @@ TEST_F(TimerHeapTest, CancelledTaskIsDestroyedExactlyOnce)
     destroyed            = 0;
 
     auto* node = ntt_task_create_inl(
-        +[](void*) { FAIL() << "cancelled timer must not run"; },
+        +[](void*, ntt_task_action_t action) {
+            ASSERT_NE(action, NTT_TASK_RUN) << "cancelled timer must not run";
+        },
         +[](void* ptr) {
             destroyed += 1;
             ntt_free(ptr);
@@ -235,6 +238,56 @@ TEST_F(TimerHeapTest, CancelledTaskIsDestroyedExactlyOnce)
     ntt_timer_heap_cancel(&heap, tag);
 
     ASSERT_EQ(destroyed, 1);
+}
+
+TEST_F(TimerHeapTest, CancelDestroysTaskCaptures)
+{
+    auto captured = std::make_shared<int>(7);
+    ASSERT_EQ(captured.use_count(), 1);
+
+    auto tag = ntt_timer_heap_push(
+        &heap,
+        10,
+        ntt::make_task([captured] { FAIL() << "cancelled timer must not run"; }));
+
+    ASSERT_EQ(captured.use_count(), 2);
+
+    ntt_timer_heap_cancel(&heap, tag);
+
+    ASSERT_EQ(captured.use_count(), 1);
+}
+
+TEST_F(TimerHeapTest, SvcDestroysTaskCaptures)
+{
+    auto captured = std::make_shared<int>(7);
+
+    ntt_timer_heap_push(
+        &heap,
+        10,
+        ntt::make_task([captured, this] { fired.push_back(*captured); }));
+
+    ASSERT_EQ(captured.use_count(), 2);
+
+    ASSERT_EQ(ntt_timer_heap_svc(&heap, 10), 1u);
+
+    ASSERT_EQ(fired, (std::vector<int> { 7 }));
+    ASSERT_EQ(captured.use_count(), 1);
+}
+
+TEST_F(TimerHeapTest, DeinitDestroysTaskCaptures)
+{
+    auto captured = std::make_shared<int>(7);
+
+    ntt_timer_heap_push(
+        &heap,
+        10,
+        ntt::make_task([captured] { FAIL() << "timer must not run"; }));
+
+    ASSERT_EQ(captured.use_count(), 2);
+
+    ntt_timer_heap_deinit(&heap);
+
+    ASSERT_EQ(captured.use_count(), 1);
 }
 
 TEST_F(TimerHeapTest, StaleTagAfterFireIsIgnored)
@@ -347,7 +400,9 @@ TEST_F(TimerHeapTest, DeinitDestroysArmedTasks)
 
     for (int i = 0; i < 3; ++i) {
         auto* node = ntt_task_create_inl(
-            +[](void*) { FAIL() << "timer must not run"; },
+            +[](void*, ntt_task_action_t action) {
+                ASSERT_NE(action, NTT_TASK_RUN) << "timer must not run";
+            },
             +[](void* ptr) {
                 destroyed += 1;
                 ntt_free(ptr);

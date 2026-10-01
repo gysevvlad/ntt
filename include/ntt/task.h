@@ -24,9 +24,23 @@ EXTERN_START
 #define NTT_TASK_PAYLOAD_ALIGN 8
 
 /**
- * @brief Task callback.
+ * @brief What a task callback is asked to do with the payload.
  */
-typedef void(ntt_task_cb_t)(void* payload);
+typedef enum ntt_task_action {
+    /** Run the payload. Does not destroy it. */
+    NTT_TASK_RUN = 0,
+
+    /** Destroy the payload without running it. */
+    NTT_TASK_DROP = 1,
+} ntt_task_action_t;
+
+/**
+ * @brief Task callback.
+ *
+ * Owns the lifetime of the payload: NTT_TASK_RUN runs it, NTT_TASK_DROP
+ * destroys it. Storage of the task itself is owned by ntt_free_cb_t instead.
+ */
+typedef void(ntt_task_cb_t)(void* payload, ntt_task_action_t action);
 
 /**
  * @brief Free callback.
@@ -49,12 +63,19 @@ NTT_EXPORT ntt_task_t* ntt_task_create(
 
 /**
  * @brief Execute task.
+ *
+ * Invokes the task callback with NTT_TASK_RUN. The payload stays alive, so
+ * ntt_task_destroy must still be called afterwards.
  */
 NTT_EXPORT void ntt_task_svc(
     ntt_task_t* self);
 
 /**
  * @brief Destroy task.
+ *
+ * Invokes the task callback with NTT_TASK_DROP and then releases the storage
+ * of the task. Called on every path, both after ntt_task_svc and instead of
+ * it when the task is cancelled.
  */
 NTT_EXPORT void ntt_task_destroy(
     ntt_task_t* self);

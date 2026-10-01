@@ -60,8 +60,12 @@ static void ntt_process_setup_signal_action()
     int rc                  = sigaction(SIGRTNTTUP, &action, NULL);
 }
 
-static void ntt_worker_stop_task_svc(ntt_task_t* task)
+static void ntt_worker_stop_task_svc(ntt_task_t* task, ntt_task_action_t action)
 {
+    if (action != NTT_TASK_RUN) {
+        return;
+    }
+
     ntt_worker_t* self = *(ntt_worker_t**)task;
     self->stopped      = 1;
 }
