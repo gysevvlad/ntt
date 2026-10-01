@@ -8,6 +8,12 @@
 #define EXTERN_STOP
 #endif
 
+#ifdef __cplusplus
+#define NTT_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
+#else
+#define NTT_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#endif
+
 #define ntt_container_of(ptr, type, member) \
     ((type*)((char*)(ptr)-offsetof(type, member)))
 

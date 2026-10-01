@@ -11,6 +11,7 @@ set(NTT_SOURCES
   src/malloc.c
   src/queue.c
   src/task.c
+  src/timer_heap.c
   src/worker.c
   src/signal.c
   src/die.c
@@ -24,6 +25,7 @@ set(NTT_TEST_SOURCES
   src/queue_test.cpp
   src/task_list_test.cpp
   src/task_test.cpp
+  src/timer_heap_test.cpp
   src/worker_test.cpp
 )
 
