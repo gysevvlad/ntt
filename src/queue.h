@@ -163,6 +163,10 @@ static inline size_t ntt_queue_use_count(
 /**
  * @brief Deinit ntt queue.
  *
+ * Does not give back the work of the loop that the queue holds: that has to
+ * happen after the storage of the queue is handed back, because the loop may
+ * finish and release that storage as soon as it does.
+ *
  * @pre ntt_queue_use_count(self) == 0
  * @pre ntt_queue_empty(self) == 1
  * @pre ntt_queue_unlinked(self) == 1
@@ -186,12 +190,16 @@ int ntt_queue_unlinked(ntt_queue_t* queue);
  *
  * @return Returns 1 if the queue is empty, 0 otherwise.
  *
- * @note Only for assert check.
+ * @note Only for assert check. Takes the lock of the queue, so in a release
+ *       build, where the asserts are gone, it costs nothing.
  */
 int ntt_queue_empty(ntt_queue_t* queue);
 
 /**
  * @brief Take pointer to the first task in queue.
+ *
+ * Also the point where this queue synchronizes with whoever pushed the task:
+ * the lock taken here pairs with the unlock of the push.
  *
  * @pre ntt_queue_empty(queue) == 0
  */

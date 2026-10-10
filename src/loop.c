@@ -335,11 +335,23 @@ void ntt_loop_work_leave(ntt_loop_t* self)
     size_t prev = atomic_fetch_sub(&self->work_cnt, 1);
     assert(prev > 0 && "[ntt_loop] work leave on already destroyed loop");
 
-    if (prev == 1) {
-        unsigned i = 0;
-        for (; i < self->width; ++i) {
-            ntt_worker_release(self->workers[i].worker);
-        }
+    if (prev != 1) {
+        return;
+    }
+
+    // Take everything out of the loop before waking anybody: the first stop
+    // task may be enough for every worker to finish, and then this very
+    // structure is freed while the next read of it is still ahead.
+    ntt_worker_t* workers[NTT_MAX_LOOP_WIDTH];
+    unsigned width = self->width;
+
+    unsigned i = 0;
+    for (; i < width; ++i) {
+        workers[i] = self->workers[i].worker;
+    }
+
+    for (i = 0; i < width; ++i) {
+        ntt_worker_release(workers[i]);
     }
 }
 

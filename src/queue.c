@@ -25,18 +25,28 @@ int ntt_queue_unlinked(ntt_queue_t* queue)
 
 int ntt_queue_empty(ntt_queue_t* queue)
 {
-    return ntt_task_list_empty(&queue->task_list);
+    pthread_spin_lock(&queue->lock);
+    int empty = ntt_task_list_empty(&queue->task_list);
+    pthread_spin_unlock(&queue->lock);
+
+    return empty;
 }
 
 ntt_task_t* ntt_queue_front(ntt_queue_t* queue)
 {
-    assert(ntt_queue_empty(queue) == 0);
+    // Taken under the lock, and not only to read a stable head pointer: this
+    // is what pairs with the unlock of the push and makes the payload the
+    // producer wrote visible here. Reading the head without it leaves the
+    // payload unsynchronized, which is a data race even though the head
+    // itself happens to be stable.
+    pthread_spin_lock(&queue->lock);
 
-    // Assumes the push occurs beforehand with release memory ordering.
-    // The sentinel.next node is no longer modified.
-    // Therefore, it is safe to read the head pointer without acquiring a lock.
+    assert(ntt_task_list_empty(&queue->task_list) == 0);
+    ntt_task_t* task = ntt_task_list_front(&queue->task_list);
 
-    return ntt_task_list_front(&queue->task_list);
+    pthread_spin_unlock(&queue->lock);
+
+    return task;
 }
 
 ntt_task_t* ntt_queue_next(ntt_queue_t* queue)
@@ -184,10 +194,6 @@ void ntt_queue_deinit(
 
     ntt_timer_heap_deinit(&self->timers);
 
-    if (self->loop != NULL) {
-        ntt_loop_work_leave(self->loop);
-    }
-
     pthread_spin_destroy(&self->lock);
 }
 
@@ -332,8 +338,8 @@ void ntt_queue_release(
 {
     size_t prev = atomic_fetch_sub(&self->external_refs, 1);
     if (prev == 1) {
-        ntt_loop_t* loop  = self->loop;
-        uint32_t index    = self->slab_index;
+        ntt_loop_t* loop = self->loop;
+        uint32_t index   = self->slab_index;
 
         ntt_queue_deinit(self);
 
@@ -341,6 +347,13 @@ void ntt_queue_release(
             ntt_queue_slab_give(ntt_loop_queue_slab(loop), index);
         } else {
             ntt_free(self);
+        }
+
+        // Last of all: this is the work of the loop that the queue held, and
+        // the moment it is gone the loop may finish and tear down the slab
+        // this queue was just given back to.
+        if (loop != NULL) {
+            ntt_loop_work_leave(loop);
         }
     }
 }
