@@ -5,6 +5,17 @@
 #include "./queue.h"
 
 #include <assert.h>
+#include <stdlib.h>
+
+/**
+ * @brief Bytes between two queues of a block.
+ *
+ * Rounded up to a cache line so that the hot head of a queue, its reference
+ * count, its task list, its lock and its combine node, never shares a line
+ * with the queue next to it.
+ */
+#define NTT_QUEUE_SLAB_STRIDE \
+    (((sizeof(ntt_queue_t) + 63) / 64) * 64)
 
 static ntt_queue_t* ntt_queue_slab_block_at(
     const ntt_queue_slab_t* self,
@@ -15,7 +26,7 @@ static ntt_queue_t* ntt_queue_slab_block_at(
         memory_order_acquire);
 
     return (ntt_queue_t*)((char*)block
-        + ((index % NTT_QUEUE_SLAB_BLOCK) * sizeof(ntt_queue_t)));
+        + ((index % NTT_QUEUE_SLAB_BLOCK) * NTT_QUEUE_SLAB_STRIDE));
 }
 
 ntt_queue_t* ntt_queue_slab_at(const ntt_queue_slab_t* self, uint32_t index)
@@ -75,7 +86,7 @@ ntt_queue_t* ntt_queue_slab_take(ntt_queue_slab_t* self, uint32_t* index)
 
             atomic_store_explicit(
                 &self->blocks[self->block_cnt],
-                (uintptr_t)ntt_malloc_or_die(sizeof(ntt_queue_t) * NTT_QUEUE_SLAB_BLOCK),
+                (uintptr_t)ntt_aligned_or_die(64, NTT_QUEUE_SLAB_STRIDE * NTT_QUEUE_SLAB_BLOCK),
                 memory_order_release);
             self->block_cnt += 1;
         }

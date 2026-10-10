@@ -30,6 +30,15 @@ void* ntt_realloc_or_die(void* ptr, size_t s)
     return new_ptr;
 }
 
+void* ntt_aligned_or_die(size_t align, size_t s)
+{
+    void* ptr = aligned_alloc(align, s);
+    if (ptr == NULL) {
+        ntt_die();
+    }
+    return ptr;
+}
+
 void ntt_free(void* ptr)
 {
     return free(ptr);
