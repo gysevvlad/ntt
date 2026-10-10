@@ -15,7 +15,9 @@ typedef struct ntt_queue ntt_queue_t;
 /**
  * @brief Create ntt_queue_t in the current ntt_loop_t.
  *
- * @pre ntt_loop_current() != NULL
+ * The queue uses the default timer service of the loop.
+ *
+ * @pre Called from a loop context.
  */
 NTT_EXPORT ntt_queue_t* ntt_queue_create();
 

@@ -1,5 +1,6 @@
 #include "./loop.h"
 #include "./die.h"
+#include "./timer_service.h"
 #include "./signal.h"
 #include "./worker.h"
 #include "combine.h"
@@ -23,9 +24,12 @@
 #include <sys/eventfd.h>
 #include <threads.h>
 
-static ntt_loop_t* g_main_loop = NULL;
-
 static thread_local ntt_loop_t* ntt_ts_loop = NULL;
+
+ntt_loop_t* ntt_loop_self()
+{
+    return ntt_ts_loop;
+}
 
 static void ntt_loop_worker_enter(void* ctx, ntt_worker_t* worker)
 {
@@ -263,12 +267,15 @@ void ntt_loop_run(ntt_task_t* task, unsigned width)
     event.data.ptr = &self->combine_event;
     ntt_epoll_ctl_or_die(self->epoll_fd, EPOLL_CTL_ADD, self->combine_eventfd, &event);
 
+    ntt_timer_service_init(&self->timer_service, self);
+
     ntt_queue_t* queue = ntt_malloc(sizeof(ntt_queue_t));
     ntt_queue_init(
         queue,
         &self->combine,
         (ntt_queue_wakeup_cb_t*)ntt_combine_push,
         self);
+    ntt_queue_set_timer_service(queue, ntt_loop_timer_service(self));
     ntt_queue_push_task(queue, task);
 
     // on reference captured by combine
@@ -307,7 +314,11 @@ void ntt_loop_run(ntt_task_t* task, unsigned width)
 
 void ntt_loop_destroy(ntt_loop_t* self)
 {
-    // TODO(vg): ...
+    // Every worker has joined, so no queue can be registered any more and no
+    // one can be inside a timerfd handler.
+    ntt_timer_service_deinit(&self->timer_service);
+
+    // TODO(vg): the rest of the loop teardown
 }
 
 void ntt_loop_work_enter(ntt_loop_t* self)
@@ -366,6 +377,19 @@ void ntt_loop_push_barrier(ntt_loop_t* self, ntt_task_t* task)
             self->workers[i].worker,
             ntt_task_create_with_ctx(ntt_barrier_svc, ntt_free, context));
     }
+}
+
+void ntt_loop_add_internal_epoll_event(
+    ntt_loop_t* self,
+    int fd,
+    struct epoll_event* event)
+{
+    ntt_epoll_ctl_or_die(self->epoll_fd, EPOLL_CTL_ADD, fd, event);
+}
+
+ntt_combine_t* ntt_loop_combine(ntt_loop_t* self)
+{
+    return &self->combine;
 }
 
 void ntt_loop_add_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event)

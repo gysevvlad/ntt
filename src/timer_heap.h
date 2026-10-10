@@ -2,6 +2,7 @@
 
 #include "ntt/defs.h"
 #include "ntt/task.h"
+#include "ntt/timer.h" // IWYU pragma: export
 
 EXTERN_START
 
@@ -29,18 +30,6 @@ NTT_STATIC_ASSERT(
  * @brief Sentinel for an absent slot index.
  */
 #define NTT_TIMER_SLOT_NONE UINT32_MAX
-
-/**
- * @brief Timer handle.
- *
- * Returned by ntt_timer_heap_push and consumed by ntt_timer_heap_cancel.
- * The handle is single-use: once the timer has fired or has been cancelled
- * the handle is stale and must not be used again.
- */
-typedef struct ntt_timer_tag {
-    uint32_t index;
-    uint32_t version;
-} ntt_timer_tag_t;
 
 /**
  * @brief Heap entry.
@@ -120,25 +109,6 @@ typedef struct ntt_timer_heap {
     /** Sequence number for the next started timer. */
     uint64_t seq_next;
 } ntt_timer_heap_t;
-
-/**
- * @brief Make a tag that refers to no timer.
- */
-static inline ntt_timer_tag_t ntt_timer_tag_null()
-{
-    ntt_timer_tag_t tag = { 0, 0 };
-    return tag;
-}
-
-/**
- * @brief Check that a tag refers to no timer.
- *
- * @return Returns 1 for a null tag, otherwise 0.
- */
-static inline int ntt_timer_tag_is_null(ntt_timer_tag_t tag)
-{
-    return tag.version == 0 ? 1 : 0;
-}
 
 /**
  * @brief Initialize an empty timer heap.

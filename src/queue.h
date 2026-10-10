@@ -3,9 +3,13 @@
 #include "ntt/loop.h"
 #include "ntt/queue.h" // IWYU pragma: export
 
+#include "./queue_heap.h"
 #include "./task_list.h"
+#include "./timer_heap.h"
+#include "./timer_service.h"
 #include "ntt/impl/atomic.h"
 #include "ntt/task.h"
+#include "ntt/timer.h"
 
 EXTERN_START
 
@@ -21,6 +25,24 @@ struct ntt_queue {
     void* context;
     ntt_queue_wakeup_cb_t* wakeup_cb;
     ntt_loop_t* loop;
+
+    /** Timers of this queue. Touched only from its own serial context. */
+    ntt_timer_heap_t timers;
+
+    ntt_timer_service_t* timer_service;
+
+    /** Position in the heap of the service, guarded by the service lock. */
+    uint32_t timer_pos;
+
+    /**
+     * @brief Deadline this queue is registered with in the service.
+     *
+     * UINT64_MAX when it is not registered. Written under the service lock and
+     * read without it from the queue context, where a stale value is safe: it
+     * only ever makes the queue register again, and the registration that is
+     * in flight will wake it anyway.
+     */
+    atomic_uint_fast64_t timer_key;
 };
 
 /**
@@ -87,6 +109,48 @@ ntt_task_t* ntt_queue_front(ntt_queue_t* queue);
  * @pre ntt_queue_empty(queue) == 0
  */
 ntt_task_t* ntt_queue_next(ntt_queue_t* queue);
+
+/**
+ * @brief Push the task that drains the timers of this queue.
+ *
+ * Called by the timer service when the deadline of the queue has passed. The
+ * task runs the expired timers in the queue context, one at a time, so that
+ * the callback of one may still cancel another.
+ */
+void ntt_queue_wakeup_timers(ntt_queue_t* queue);
+
+/**
+ * @brief Bind the queue to a timer service.
+ */
+void ntt_queue_set_timer_service(ntt_queue_t* queue, ntt_timer_service_t* service);
+
+/**
+ * @brief The timer service of this queue, NULL when it has none.
+ */
+static inline ntt_timer_service_t* ntt_queue_timer_service(ntt_queue_t* queue)
+{
+    return queue->timer_service;
+}
+
+/**
+ * @brief The timer heap of this queue.
+ *
+ * @pre Called from the context of this queue.
+ */
+static inline ntt_timer_heap_t* ntt_queue_timers(ntt_queue_t* queue)
+{
+    return &queue->timers;
+}
+
+/**
+ * @brief Register the earliest deadline of this queue with its service.
+ *
+ * Does nothing when the service already knows a deadline that is not later.
+ * Drops the registration when no timer is left.
+ *
+ * @pre Called from the context of this queue.
+ */
+void ntt_queue_sync_timers(ntt_queue_t* queue);
 
 /**
  * @brief Push task to the queue.

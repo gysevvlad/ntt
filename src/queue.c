@@ -2,8 +2,10 @@
 
 #include "./loop.h"
 #include "./task.h"
+#include "./timer_service.h"
 #include "./task_list.h"
 #include "ntt/queue.h"
+#include "./combine.h"
 
 #include <pthread.h>
 #include <threads.h>
@@ -152,6 +154,11 @@ void ntt_queue_init(
     self->wakeup_cb = wakeup_cb;
     self->loop      = loop;
 
+    ntt_timer_heap_init(&self->timers);
+    self->timer_service = NULL;
+    self->timer_pos     = NTT_QUEUE_HEAP_NONE;
+    self->timer_key     = UINT64_MAX;
+
     if (self->loop != NULL) {
         ntt_loop_work_enter(self->loop);
     }
@@ -164,6 +171,11 @@ void ntt_queue_deinit(
     assert(ntt_queue_empty(self) == 1);
     assert(ntt_queue_unlinked(self) == 1);
 
+    assert(ntt_timer_heap_empty(&self->timers) == 1);
+    assert(self->timer_pos == NTT_QUEUE_HEAP_NONE);
+
+    ntt_timer_heap_deinit(&self->timers);
+
     if (self->loop != NULL) {
         ntt_loop_work_leave(self->loop);
     }
@@ -171,10 +183,70 @@ void ntt_queue_deinit(
     pthread_spin_destroy(&self->lock);
 }
 
+/**
+ * @brief Body of the task that drains the timers of a queue.
+ */
+static void ntt_queue_timers_task_svc(void* payload, ntt_task_action_t action)
+{
+    if (action != NTT_TASK_RUN) {
+        return;
+    }
+
+    ntt_queue_t* self = *(ntt_queue_t**)payload;
+
+    assert(ntt_queue_self() == self);
+
+    ntt_timer_heap_svc(&self->timers, ntt_now_ns());
+    ntt_queue_sync_timers(self);
+}
+
+void ntt_queue_wakeup_timers(ntt_queue_t* queue)
+{
+    ntt_queue_push_task(
+        queue,
+        ntt_task_create_with_ctx(ntt_queue_timers_task_svc, NULL, queue));
+}
+
+void ntt_queue_set_timer_service(ntt_queue_t* queue, ntt_timer_service_t* service)
+{
+    queue->timer_service = service;
+}
+
+void ntt_queue_sync_timers(ntt_queue_t* queue)
+{
+    assert(ntt_queue_self() == queue);
+
+    uint64_t deadline = 0;
+
+    if (ntt_timer_heap_peek(&queue->timers, &deadline) == 0) {
+        if (atomic_load_explicit(&queue->timer_key, memory_order_relaxed) != UINT64_MAX) {
+            ntt_timer_service_deregister(queue->timer_service, queue);
+        }
+        return;
+    }
+
+    if (deadline < atomic_load_explicit(&queue->timer_key, memory_order_relaxed)) {
+        ntt_timer_service_register(queue->timer_service, queue, deadline);
+    }
+}
+
 ntt_queue_t* ntt_queue_create()
 {
-    // TODO(vg): impl
-    return NULL;
+    ntt_loop_t* loop = ntt_loop_self();
+
+    assert(loop != NULL && "[ntt_queue_create] not in a loop context");
+
+    ntt_queue_t* self = ntt_malloc_or_die(sizeof(ntt_queue_t));
+
+    ntt_queue_init(
+        self,
+        ntt_loop_combine(loop),
+        (ntt_queue_wakeup_cb_t*)ntt_combine_push,
+        loop);
+
+    self->timer_service = ntt_loop_timer_service(loop);
+
+    return self;
 }
 
 void ntt_queue_push(ntt_queue_t* queue, ntt_task_t* task)
