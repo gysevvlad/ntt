@@ -18,16 +18,19 @@ struct ntt_list {
  */
 static inline void ntt_list_init(ntt_list_t* self)
 {
-    self->sentinel.next = &self->sentinel;
+    ntt_node_set_next_relaxed(&self->sentinel, &self->sentinel);
     self->sentinel.prev = &self->sentinel;
 }
 
 /**
  * @brief Check that list is empty.
+ *
+ * @note Reads the head with acquire ordering, so it is safe to call without
+ *       the lock that guards the list.
  */
-static inline int ntt_list_empty(ntt_list_t* self)
+static inline int ntt_list_empty(const ntt_list_t* self)
 {
-    return self->sentinel.next == &self->sentinel ? 1 : 0;
+    return ntt_node_next_acquire(&self->sentinel) == &self->sentinel ? 1 : 0;
 }
 
 /**
@@ -39,11 +42,15 @@ static inline int ntt_list_push_back(ntt_list_t* self, ntt_node_t* node)
 {
     int rc = ntt_list_empty(self);
 
-    node->next = &self->sentinel;
+    ntt_node_set_next_relaxed(node, &self->sentinel);
     node->prev = self->sentinel.prev;
 
-    self->sentinel.prev->next = node;
-    self->sentinel.prev       = node;
+    // The store that makes the node reachable. When the list was empty this is
+    // the head itself, which a reader may be loading without the lock, so it
+    // publishes everything written before it.
+    ntt_node_set_next_release(self->sentinel.prev, node);
+
+    self->sentinel.prev = node;
 
     return rc;
 }
@@ -53,9 +60,9 @@ static inline int ntt_list_push_back(ntt_list_t* self, ntt_node_t* node)
  *
  * @pre ntt_list_empty(self) != 1
  */
-static inline ntt_node_t* ntt_list_front(ntt_list_t* self)
+static inline ntt_node_t* ntt_list_front(const ntt_list_t* self)
 {
-    return self->sentinel.next;
+    return ntt_node_next_acquire(&self->sentinel);
 }
 
 /**
@@ -67,14 +74,13 @@ static inline ntt_node_t* ntt_list_front(ntt_list_t* self)
  */
 static inline ntt_node_t* ntt_list_next(ntt_list_t* self)
 {
-    ntt_node_t* head = self->sentinel.next;
+    ntt_node_t* head = ntt_node_next_relaxed(&self->sentinel);
+    ntt_node_t* next = ntt_node_next_relaxed(head);
 
-    self->sentinel.next = head->next;
-    head->next->prev    = &self->sentinel;
+    ntt_node_set_next_relaxed(&self->sentinel, next);
+    next->prev = &self->sentinel;
 
-    head->next = NULL;
-
-    ntt_node_t* next = self->sentinel.next;
+    ntt_node_set_next_relaxed(head, NULL);
 
     return next != &self->sentinel ? next : NULL;
 }

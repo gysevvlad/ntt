@@ -25,28 +25,19 @@ int ntt_queue_unlinked(ntt_queue_t* queue)
 
 int ntt_queue_empty(ntt_queue_t* queue)
 {
-    pthread_spin_lock(&queue->lock);
-    int empty = ntt_task_list_empty(&queue->task_list);
-    pthread_spin_unlock(&queue->lock);
-
-    return empty;
+    return ntt_task_list_empty(&queue->task_list);
 }
 
 ntt_task_t* ntt_queue_front(ntt_queue_t* queue)
 {
-    // Taken under the lock, and not only to read a stable head pointer: this
-    // is what pairs with the unlock of the push and makes the payload the
-    // producer wrote visible here. Reading the head without it leaves the
-    // payload unsynchronized, which is a data race even though the head
-    // itself happens to be stable.
-    pthread_spin_lock(&queue->lock);
+    assert(ntt_queue_empty(queue) == 0);
 
-    assert(ntt_task_list_empty(&queue->task_list) == 0);
-    ntt_task_t* task = ntt_task_list_front(&queue->task_list);
-
-    pthread_spin_unlock(&queue->lock);
-
-    return task;
+    // No lock here: the head is loaded with acquire ordering and pairs with
+    // the release store of the push that made this queue non empty, which is
+    // what makes the payload the producer wrote visible. The head itself is
+    // stable, because a push into a non empty list writes the next pointer of
+    // the tail rather than this one.
+    return ntt_task_list_front(&queue->task_list);
 }
 
 ntt_task_t* ntt_queue_next(ntt_queue_t* queue)

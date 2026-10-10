@@ -38,7 +38,7 @@ static inline int ntt_task_list_push(ntt_task_list_t* self, ntt_task_t* task)
     return ntt_list_push_back(&self->list, &task_node->node);
 }
 
-static inline int ntt_task_list_empty(ntt_task_list_t* self)
+static inline int ntt_task_list_empty(const ntt_task_list_t* self)
 {
     return ntt_list_empty(&self->list);
 }
@@ -48,11 +48,11 @@ static inline int ntt_task_list_empty(ntt_task_list_t* self)
  *
  * @pre ntt_task_list_empty(self) == 0
  */
-static inline ntt_task_t* ntt_task_list_front(ntt_task_list_t* self)
+static inline ntt_task_t* ntt_task_list_front(const ntt_task_list_t* self)
 {
     assert(ntt_task_list_empty(self) == 0);
 
-    ntt_node_t* node = ntt_list_front(&self->list);
+    const ntt_node_t* node = ntt_list_front(&self->list);
 
     ntt_task_node_t* task_node = ntt_container_of(node, ntt_task_node_t, node);
 

@@ -190,16 +190,14 @@ int ntt_queue_unlinked(ntt_queue_t* queue);
  *
  * @return Returns 1 if the queue is empty, 0 otherwise.
  *
- * @note Only for assert check. Takes the lock of the queue, so in a release
- *       build, where the asserts are gone, it costs nothing.
+ * @note Only for assert check. May be called while another thread pushes.
  */
 int ntt_queue_empty(ntt_queue_t* queue);
 
 /**
  * @brief Take pointer to the first task in queue.
  *
- * Also the point where this queue synchronizes with whoever pushed the task:
- * the lock taken here pairs with the unlock of the push.
+ * May be called while another thread pushes.
  *
  * @pre ntt_queue_empty(queue) == 0
  */
@@ -272,6 +270,9 @@ static inline uint32_t ntt_queue_slab_index(const ntt_queue_t* self)
 
 /**
  * @brief Push task to the queue.
+ *
+ * Whatever the caller wrote into the task before the push is visible to the
+ * context that takes it out of the queue.
  *
  * @note Acquires the queue if it was empty before the push.
  *
