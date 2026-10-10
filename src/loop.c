@@ -22,6 +22,7 @@
 #include <string.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <unistd.h>
 #include <threads.h>
 
 static thread_local ntt_loop_t* ntt_ts_loop = NULL;
@@ -318,7 +319,13 @@ void ntt_loop_destroy(ntt_loop_t* self)
     // one can be inside a timerfd handler.
     ntt_timer_service_deinit(&self->timer_service);
 
-    // TODO(vg): the rest of the loop teardown
+    ntt_combine_deinit(&self->combine);
+
+    close(self->combine_eventfd);
+    close(self->epoll_fd);
+
+    pthread_cond_destroy(&self->cv);
+    pthread_mutex_destroy(&self->mtx);
 }
 
 void ntt_loop_work_enter(ntt_loop_t* self)
