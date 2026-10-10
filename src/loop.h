@@ -1,6 +1,7 @@
 #pragma once
 
 #include "./queue.h"
+#include "./queue_slab.h"
 #include "./timer_service.h"
 #include "combine.h"
 #include "ntt/defs.h"
@@ -37,6 +38,9 @@ struct ntt_loop {
     int combine_eventfd;
     ntt_epoll_event_t combine_event;
 
+    /** Storage of every queue created in this loop. */
+    ntt_queue_slab_t queue_slab;
+
     /** The timer service every queue of this loop is armed on. */
     ntt_timer_service_t timer_service;
 
@@ -70,6 +74,14 @@ void ntt_loop_add_internal_epoll_event(
     ntt_loop_t* self,
     int fd,
     struct epoll_event* event);
+
+/**
+ * @brief The queue slab of this loop.
+ */
+static inline ntt_queue_slab_t* ntt_loop_queue_slab(ntt_loop_t* self)
+{
+    return &self->queue_slab;
+}
 
 /**
  * @brief The timer service of this loop.

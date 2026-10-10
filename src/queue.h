@@ -4,6 +4,7 @@
 #include "ntt/queue.h" // IWYU pragma: export
 
 #include "./queue_heap.h"
+#include "./queue_slab.h"
 #include "./task_list.h"
 #include "./timer_heap.h"
 #include "./timer_service.h"
@@ -31,18 +32,44 @@ struct ntt_queue {
 
     ntt_timer_service_t* timer_service;
 
-    /** Position in the heap of the service, guarded by the service lock. */
-    uint32_t timer_pos;
+    /**
+     * @brief Generation of the registration in the timer service.
+     *
+     * The single source of truth about whether an entry of the service still
+     * stands. Whoever invalidates a registration bumps it: the queue context
+     * when it registers again or has no timer left, and a worker when it takes
+     * the entry out to wake the queue. An entry carrying an older value is a
+     * tombstone, so dropping a registration touches neither the heap of the
+     * service nor its lock.
+     *
+     * Owned by the slab across reuse of the slot, so an entry of a dead queue
+     * can never match a later tenant.
+     */
+    atomic_uint_fast32_t timer_gen;
+
+    /** Generation this queue last registered with. Queue context only. */
+    uint32_t timer_reg_gen;
+
+    /** Deadline this queue last registered. Queue context only. */
+    uint64_t timer_reg_deadline;
+
+    /** Slot in the queue slab, NTT_QUEUE_SLAB_NONE when not from the slab. */
+    uint32_t slab_index;
+
+    /** Free list link of the slab, owned by it, meaningless while alive. */
+    uint32_t slab_next_free;
+
+    /** Whether the queue holds a reference to itself for its armed timers. */
+    int timer_self_ref;
 
     /**
-     * @brief Deadline this queue is registered with in the service.
+     * @brief Entries of this queue that are tombstones but still in the heap.
      *
-     * UINT64_MAX when it is not registered. Written under the service lock and
-     * read without it from the queue context, where a stale value is safe: it
-     * only ever makes the queue register again, and the registration that is
-     * in flight will wake it anyway.
+     * Retiring a registration does not reach the service, so the tombstone it
+     * leaves is counted here and handed over with the next registration. The
+     * service needs the count to know when to rebuild its heap.
      */
-    atomic_uint_fast64_t timer_key;
+    uint32_t timer_tombstones;
 };
 
 /**
@@ -53,6 +80,76 @@ void ntt_queue_init(
     void* context,
     ntt_queue_wakeup_cb_t* wakeup_cb,
     ntt_loop_t* loop);
+
+/**
+ * @brief Slab bookkeeping, used only by ntt_queue_slab.
+ */
+static inline uint32_t ntt_queue_slab_next_free(const ntt_queue_t* self)
+{
+    return self->slab_next_free;
+}
+
+static inline void ntt_queue_slab_set_next_free(ntt_queue_t* self, uint32_t next)
+{
+    self->slab_next_free = next;
+}
+
+static inline void ntt_queue_slab_init_generation(ntt_queue_t* self)
+{
+    atomic_store_explicit(&self->timer_gen, 1, memory_order_relaxed);
+}
+
+static inline void ntt_queue_slab_bump_generation(ntt_queue_t* self)
+{
+    atomic_fetch_add_explicit(&self->timer_gen, 1, memory_order_release);
+}
+
+/**
+ * @brief The generation of the registration this queue would use now.
+ */
+static inline uint32_t ntt_queue_timer_generation(const ntt_queue_t* self)
+{
+    return (uint32_t)atomic_load_explicit(&self->timer_gen, memory_order_acquire);
+}
+
+/**
+ * @brief Bump the registration generation, retiring every entry of this queue.
+ *
+ * @pre Called from the context of this queue.
+ */
+static inline uint32_t ntt_queue_retire_timer_generation(ntt_queue_t* self)
+{
+    return (uint32_t)atomic_fetch_add_explicit(&self->timer_gen, 1, memory_order_release) + 1;
+}
+
+/**
+ * @brief Take a reference only if the queue is still alive.
+ *
+ * Needed by the timer service: the storage of a queue outlives it, so an entry
+ * may be looked at after the queue is gone. Acquiring without this check could
+ * resurrect a queue that is being destroyed.
+ *
+ * @return Returns 1 when a reference was taken, otherwise 0.
+ */
+static inline int ntt_queue_acquire_if_live(ntt_queue_t* self)
+{
+    size_t refs = atomic_load_explicit(&self->external_refs, memory_order_relaxed);
+
+    for (;;) {
+        if (refs == 0) {
+            return 0;
+        }
+
+        if (atomic_compare_exchange_weak_explicit(
+                &self->external_refs,
+                &refs,
+                refs + 1,
+                memory_order_acquire,
+                memory_order_relaxed)) {
+            return 1;
+        }
+    }
+}
 
 /**
  * @brief Get control block counter.
@@ -146,11 +243,24 @@ static inline ntt_timer_heap_t* ntt_queue_timers(ntt_queue_t* queue)
  * @brief Register the earliest deadline of this queue with its service.
  *
  * Does nothing when the service already knows a deadline that is not later.
- * Drops the registration when no timer is left.
+ * Drops the registration when no timer is left, which costs one atomic add.
  *
  * @pre Called from the context of this queue.
  */
 void ntt_queue_sync_timers(ntt_queue_t* queue);
+
+/**
+ * @brief Create a queue of this loop, taken from its queue slab.
+ */
+ntt_queue_t* ntt_queue_create_in(ntt_loop_t* loop);
+
+/**
+ * @brief The slot of this queue in the slab.
+ */
+static inline uint32_t ntt_queue_slab_index(const ntt_queue_t* self)
+{
+    return self->slab_index;
+}
 
 /**
  * @brief Push task to the queue.

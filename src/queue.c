@@ -2,6 +2,7 @@
 
 #include "./loop.h"
 #include "./task.h"
+#include "./queue_slab.h"
 #include "./timer_service.h"
 #include "./task_list.h"
 #include "ntt/queue.h"
@@ -155,9 +156,17 @@ void ntt_queue_init(
     self->loop      = loop;
 
     ntt_timer_heap_init(&self->timers);
-    self->timer_service = NULL;
-    self->timer_pos     = NTT_QUEUE_HEAP_NONE;
-    self->timer_key     = UINT64_MAX;
+    self->timer_service      = NULL;
+    self->timer_reg_gen      = 0;
+    self->timer_reg_deadline = UINT64_MAX;
+    self->timer_self_ref     = 0;
+    self->timer_tombstones   = 0;
+    self->slab_index         = NTT_QUEUE_SLAB_NONE;
+
+    // Generations start at one, so this value matches no entry of the timer
+    // service. A queue taken from the slab restores the generation of its slot
+    // right after this call.
+    atomic_store_explicit(&self->timer_gen, 0, memory_order_relaxed);
 
     if (self->loop != NULL) {
         ntt_loop_work_enter(self->loop);
@@ -172,7 +181,6 @@ void ntt_queue_deinit(
     assert(ntt_queue_unlinked(self) == 1);
 
     assert(ntt_timer_heap_empty(&self->timers) == 1);
-    assert(self->timer_pos == NTT_QUEUE_HEAP_NONE);
 
     ntt_timer_heap_deinit(&self->timers);
 
@@ -216,18 +224,59 @@ void ntt_queue_sync_timers(ntt_queue_t* queue)
 {
     assert(ntt_queue_self() == queue);
 
+    // The registration stands only while nobody has bumped the generation
+    // since it was made.
+    int registered = ntt_queue_timer_generation(queue) == queue->timer_reg_gen;
+
     uint64_t deadline = 0;
 
     if (ntt_timer_heap_peek(&queue->timers, &deadline) == 0) {
-        if (atomic_load_explicit(&queue->timer_key, memory_order_relaxed) != UINT64_MAX) {
-            ntt_timer_service_deregister(queue->timer_service, queue);
+        if (registered) {
+            // Dropping the registration is one atomic add: the entry of the
+            // service becomes a tombstone, counted here until the next
+            // registration hands the count over.
+            ntt_queue_retire_timer_generation(queue);
+            queue->timer_tombstones += 1;
         }
+
+        if (queue->timer_self_ref) {
+            queue->timer_self_ref = 0;
+            ntt_queue_release(queue);
+        }
+
         return;
     }
 
-    if (deadline < atomic_load_explicit(&queue->timer_key, memory_order_relaxed)) {
-        ntt_timer_service_register(queue->timer_service, queue, deadline);
+    // Armed timers keep the queue, and through it the loop, alive. The service
+    // holds nothing, so this is the only thing that does.
+    if (!queue->timer_self_ref) {
+        ntt_queue_acquire(queue);
+        queue->timer_self_ref = 1;
     }
+
+    if (registered && queue->timer_reg_deadline <= deadline) {
+        return;
+    }
+
+    if (registered) {
+        // The entry that stands now is replaced by the one below.
+        queue->timer_tombstones += 1;
+    }
+
+    uint32_t generation = ntt_queue_retire_timer_generation(queue);
+
+    queue->timer_reg_gen      = generation;
+    queue->timer_reg_deadline = deadline;
+
+    uint32_t tombstones     = queue->timer_tombstones;
+    queue->timer_tombstones = 0;
+
+    ntt_timer_service_register(
+        queue->timer_service,
+        queue->slab_index,
+        generation,
+        deadline,
+        tombstones);
 }
 
 ntt_queue_t* ntt_queue_create()
@@ -236,7 +285,18 @@ ntt_queue_t* ntt_queue_create()
 
     assert(loop != NULL && "[ntt_queue_create] not in a loop context");
 
-    ntt_queue_t* self = ntt_malloc_or_die(sizeof(ntt_queue_t));
+    return ntt_queue_create_in(loop);
+}
+
+ntt_queue_t* ntt_queue_create_in(ntt_loop_t* loop)
+{
+    uint32_t index = NTT_QUEUE_SLAB_NONE;
+
+    ntt_queue_t* self = ntt_queue_slab_take(ntt_loop_queue_slab(loop), &index);
+
+    // The slab owns the generation of the slot across reuse, so it has to
+    // survive the init that follows.
+    uint32_t generation = ntt_queue_timer_generation(self);
 
     ntt_queue_init(
         self,
@@ -244,6 +304,9 @@ ntt_queue_t* ntt_queue_create()
         (ntt_queue_wakeup_cb_t*)ntt_combine_push,
         loop);
 
+    atomic_store_explicit(&self->timer_gen, generation, memory_order_relaxed);
+
+    self->slab_index    = index;
     self->timer_service = ntt_loop_timer_service(loop);
 
     return self;
@@ -269,8 +332,16 @@ void ntt_queue_release(
 {
     size_t prev = atomic_fetch_sub(&self->external_refs, 1);
     if (prev == 1) {
+        ntt_loop_t* loop  = self->loop;
+        uint32_t index    = self->slab_index;
+
         ntt_queue_deinit(self);
-        ntt_free(self);
+
+        if (index != NTT_QUEUE_SLAB_NONE) {
+            ntt_queue_slab_give(ntt_loop_queue_slab(loop), index);
+        } else {
+            ntt_free(self);
+        }
     }
 }
 

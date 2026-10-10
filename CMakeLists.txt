@@ -16,6 +16,7 @@ set(NTT_SOURCES
   src/timer_heap.c
   src/timer_service.c
   src/queue_heap.c
+  src/queue_slab.c
   src/worker.c
   src/signal.c
   src/die.c

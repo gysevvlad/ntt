@@ -71,21 +71,23 @@ static inline ntt_loop_t* ntt_timer_service_loop(ntt_timer_service_t* self)
 }
 
 /**
- * @brief Ask the service to wake the queue no later than the deadline.
+ * @brief Ask the service to wake the slot no later than the deadline.
  *
- * Registers the queue, or moves its deadline earlier if it is registered with
- * a later one. Acquires the queue when it was not registered.
+ * Adds an entry carrying the generation the queue registers with. Entries it
+ * had before are already tombstones, and tombstones says how many of them the
+ * heap has not been told about yet, so that it knows when to rebuild.
+ *
+ * Takes no reference: the queue keeps itself alive while it has timers armed,
+ * and the service only ever upgrades a slot to a reference when it wakes it.
+ *
+ * Dropping a registration does not go through the service at all: the queue
+ * bumps its own generation.
  */
 void ntt_timer_service_register(
     ntt_timer_service_t* self,
-    ntt_queue_t* queue,
-    uint64_t deadline);
-
-/**
- * @brief Drop the registration of a queue that has no timers left.
- */
-void ntt_timer_service_deregister(
-    ntt_timer_service_t* self,
-    ntt_queue_t* queue);
+    uint32_t index,
+    uint32_t generation,
+    uint64_t deadline,
+    uint32_t tombstones);
 
 EXTERN_STOP

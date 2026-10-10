@@ -5,6 +5,7 @@
 #include "./malloc.h"
 #include "./queue.h"
 #include "./queue_heap.h"
+#include "./queue_slab.h"
 #include "./task.h"
 #include "ntt/impl/atomic.h"
 
@@ -72,51 +73,25 @@ static void ntt_timer_service_arm_locked(ntt_timer_service_t* self)
 
 void ntt_timer_service_register(
     ntt_timer_service_t* self,
-    ntt_queue_t* queue,
-    uint64_t deadline)
+    uint32_t index,
+    uint32_t generation,
+    uint64_t deadline,
+    uint32_t tombstones)
 {
     pthread_spin_lock(&self->lock);
 
-    if (queue->timer_pos == NTT_QUEUE_HEAP_NONE) {
-        // The reference is taken inside the critical section on purpose: the
-        // moment the queue is in the heap, a worker handling a tick may take
-        // it out again and release exactly this reference. Taking it after the
-        // unlock would let that release run first and destroy the queue.
-        ntt_queue_acquire(queue);
-        ntt_queue_heap_insert(&self->queues, queue, deadline);
-    } else if (deadline < self->queues.elems[queue->timer_pos].deadline) {
-        ntt_queue_heap_decrease(&self->queues, queue, deadline);
-    } else {
-        deadline = self->queues.elems[queue->timer_pos].deadline;
-    }
+    ntt_queue_heap_push(&self->queues, index, generation, deadline);
 
-    atomic_store_explicit(&queue->timer_key, deadline, memory_order_relaxed);
+    if (tombstones != 0) {
+        ntt_queue_heap_retire(
+            &self->queues,
+            ntt_loop_queue_slab(self->loop),
+            tombstones);
+    }
 
     ntt_timer_service_arm_locked(self);
 
     pthread_spin_unlock(&self->lock);
-}
-
-void ntt_timer_service_deregister(
-    ntt_timer_service_t* self,
-    ntt_queue_t* queue)
-{
-    int linked = 0;
-
-    pthread_spin_lock(&self->lock);
-
-    if (queue->timer_pos != NTT_QUEUE_HEAP_NONE) {
-        ntt_queue_heap_remove(&self->queues, queue);
-        linked = 1;
-    }
-
-    atomic_store_explicit(&queue->timer_key, UINT64_MAX, memory_order_relaxed);
-
-    pthread_spin_unlock(&self->lock);
-
-    if (linked) {
-        ntt_queue_release(queue);
-    }
 }
 
 /**
@@ -146,6 +121,8 @@ static void ntt_timer_service_ready(
         }
     }
 
+    const ntt_queue_slab_t* slab = ntt_loop_queue_slab(self->loop);
+
     for (;;) {
         ntt_queue_t* batch[NTT_TIMER_SERVICE_BATCH];
         unsigned cnt = 0;
@@ -155,20 +132,34 @@ static void ntt_timer_service_ready(
         pthread_spin_lock(&self->lock);
 
         while (cnt < NTT_TIMER_SERVICE_BATCH) {
-            ntt_queue_t* queue = ntt_queue_heap_take_expired(&self->queues, now);
+            ntt_queue_heap_elem_t elem;
 
-            if (queue == NULL) {
+            if (ntt_queue_heap_take_expired(&self->queues, slab, now, &elem) == 0) {
                 break;
             }
 
-            atomic_store_explicit(&queue->timer_key, UINT64_MAX, memory_order_relaxed);
+            ntt_queue_t* queue = ntt_queue_slab_at(slab, elem.index);
+
+            // The storage of a queue outlives the queue itself, so take a
+            // reference first and only then trust the generation: without the
+            // reference the queue could be destroyed between the two.
+            if (ntt_queue_acquire_if_live(queue) == 0) {
+                continue;
+            }
+
+            if (ntt_queue_timer_generation(queue) != elem.generation) {
+                ntt_queue_release(queue);
+                continue;
+            }
+
+            // The entry is consumed, so the registration is gone. Bumping the
+            // generation is what tells the queue context to register again.
+            ntt_queue_retire_timer_generation(queue);
+
             batch[cnt] = queue;
             cnt += 1;
         }
 
-        // The timerfd has fired, so it is disarmed. Whatever is left on top is
-        // not later than any deadline registered meanwhile, so arming at it is
-        // always correct.
         self->armed = UINT64_MAX;
         ntt_timer_service_arm_locked(self);
 
@@ -178,7 +169,7 @@ static void ntt_timer_service_ready(
         for (; i < cnt; ++i) {
             ntt_queue_wakeup_timers(batch[i]);
 
-            // The reference the heap held, now that the queue holds the task.
+            // The reference taken above, now that the queue holds the task.
             ntt_queue_release(batch[i]);
         }
 
@@ -227,7 +218,9 @@ void ntt_timer_service_init(ntt_timer_service_t* self, ntt_loop_t* loop)
 
 void ntt_timer_service_deinit(ntt_timer_service_t* self)
 {
-    assert(ntt_queue_heap_empty(&self->queues) == 1);
+    assert(
+        ntt_queue_heap_has_live(&self->queues, ntt_loop_queue_slab(self->loop)) == 0
+        && "[ntt_timer_service] queues are still registered");
 
     // Closing the descriptor removes it from the epoll of the loop.
     close(self->fd);
