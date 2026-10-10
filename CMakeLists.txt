@@ -124,3 +124,7 @@ target_link_libraries(ntt PRIVATE Threads::Threads)
 add_executable(ntt_example_00 example/example-00.c)
 
 target_link_libraries(ntt_example_00 PRIVATE ntt::ntt)
+
+add_executable(ntt_example_06 example/example-06.c)
+
+target_link_libraries(ntt_example_06 PRIVATE ntt::ntt)
