@@ -36,6 +36,7 @@ set(NTT_TEST_SOURCES
 
 set(NTT_BENCHMARK_SOURCES
   src/timer_heap_benchmark.cpp
+  src/timer_loop_benchmark.cpp
 )
 
 find_package(Threads REQUIRED)
