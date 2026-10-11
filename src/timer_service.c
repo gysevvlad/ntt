@@ -5,7 +5,7 @@
 #include "./malloc.h"
 #include "./queue.h"
 #include "./queue_heap.h"
-#include "./queue_slab.h"
+#include "./slab.h"
 #include "./task.h"
 #include "ntt/impl/atomic.h"
 
@@ -121,7 +121,7 @@ static void ntt_timer_service_ready(
         }
     }
 
-    const ntt_queue_slab_t* slab = ntt_loop_queue_slab(self->loop);
+    const ntt_slab_t* slab = ntt_loop_queue_slab(self->loop);
 
     for (;;) {
         ntt_queue_t* batch[NTT_TIMER_SERVICE_BATCH];
@@ -138,7 +138,7 @@ static void ntt_timer_service_ready(
                 break;
             }
 
-            ntt_queue_t* queue = ntt_queue_slab_at(slab, elem.index);
+            ntt_queue_t* queue = ntt_slab_at(slab, elem.index);
 
             // The storage of a queue outlives the queue itself, so take a
             // reference first and only then trust the generation: without the

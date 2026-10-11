@@ -268,7 +268,7 @@ void ntt_loop_run(ntt_task_t* task, unsigned width)
     event.data.ptr = &self->combine_event;
     ntt_epoll_ctl_or_die(self->epoll_fd, EPOLL_CTL_ADD, self->combine_eventfd, &event);
 
-    ntt_queue_slab_init(&self->queue_slab);
+    ntt_slab_init(&self->queue_slab, sizeof(ntt_queue_t));
     ntt_timer_service_init(&self->timer_service, self);
 
     ntt_queue_t* queue = ntt_queue_create_in(self);
@@ -313,7 +313,7 @@ void ntt_loop_destroy(ntt_loop_t* self)
     // Every worker has joined, so no queue can be registered any more and no
     // one can be inside a timerfd handler.
     ntt_timer_service_deinit(&self->timer_service);
-    ntt_queue_slab_deinit(&self->queue_slab);
+    ntt_slab_deinit(&self->queue_slab);
 
     ntt_combine_deinit(&self->combine);
 

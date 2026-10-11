@@ -2,7 +2,7 @@
 
 #include "./loop.h"
 #include "./task.h"
-#include "./queue_slab.h"
+#include "./slab.h"
 #include "./timer_service.h"
 #include "./task_list.h"
 #include "ntt/queue.h"
@@ -162,12 +162,6 @@ void ntt_queue_init(
     self->timer_reg_deadline = UINT64_MAX;
     self->timer_self_ref     = 0;
     self->timer_tombstones   = 0;
-    self->slab_index         = NTT_QUEUE_SLAB_NONE;
-
-    // Generations start at one, so this value matches no entry of the timer
-    // service. A queue taken from the slab restores the generation of its slot
-    // right after this call.
-    atomic_store_explicit(&self->timer_gen, 0, memory_order_relaxed);
 
     if (self->loop != NULL) {
         ntt_loop_work_enter(self->loop);
@@ -270,7 +264,7 @@ void ntt_queue_sync_timers(ntt_queue_t* queue)
 
     ntt_timer_service_register(
         queue->timer_service,
-        queue->slab_index,
+        ntt_slab_index(queue),
         generation,
         deadline,
         tombstones);
@@ -287,13 +281,7 @@ ntt_queue_t* ntt_queue_create()
 
 ntt_queue_t* ntt_queue_create_in(ntt_loop_t* loop)
 {
-    uint32_t index = NTT_QUEUE_SLAB_NONE;
-
-    ntt_queue_t* self = ntt_queue_slab_take(ntt_loop_queue_slab(loop), &index);
-
-    // The slab owns the generation of the slot across reuse, so it has to
-    // survive the init that follows.
-    uint32_t generation = ntt_queue_timer_generation(self);
+    ntt_queue_t* self = ntt_slab_take(ntt_loop_queue_slab(loop));
 
     ntt_queue_init(
         self,
@@ -301,9 +289,6 @@ ntt_queue_t* ntt_queue_create_in(ntt_loop_t* loop)
         (ntt_queue_wakeup_cb_t*)ntt_combine_push,
         loop);
 
-    atomic_store_explicit(&self->timer_gen, generation, memory_order_relaxed);
-
-    self->slab_index    = index;
     self->timer_service = ntt_loop_timer_service(loop);
 
     return self;
@@ -330,12 +315,13 @@ void ntt_queue_release(
     size_t prev = atomic_fetch_sub(&self->external_refs, 1);
     if (prev == 1) {
         ntt_loop_t* loop = self->loop;
-        uint32_t index   = self->slab_index;
+        uint32_t index   = ntt_slab_index(self);
+        int from_slab    = ntt_queue_from_slab(self);
 
         ntt_queue_deinit(self);
 
-        if (index != NTT_QUEUE_SLAB_NONE) {
-            ntt_queue_slab_give(ntt_loop_queue_slab(loop), index);
+        if (from_slab) {
+            ntt_slab_give(ntt_loop_queue_slab(loop), index);
         } else {
             ntt_free(self);
         }

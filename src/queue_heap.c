@@ -2,7 +2,7 @@
 
 #include "./malloc.h"
 #include "./queue.h"
-#include "./queue_slab.h"
+#include "./slab.h"
 
 #include <assert.h>
 
@@ -17,10 +17,10 @@ static inline int ntt_queue_heap_less(
  * @brief Check that an entry still refers to the registration that pushed it.
  */
 static inline int ntt_queue_heap_live(
-    const ntt_queue_slab_t* slab,
+    const ntt_slab_t* slab,
     const ntt_queue_heap_elem_t* elem)
 {
-    ntt_queue_t* queue = ntt_queue_slab_at(slab, elem->index);
+    ntt_queue_t* queue = ntt_slab_at(slab, elem->index);
 
     return ntt_queue_timer_generation(queue) == elem->generation ? 1 : 0;
 }
@@ -117,7 +117,7 @@ static void ntt_queue_heap_pop_root(ntt_queue_heap_t* self)
  */
 static void ntt_queue_heap_drop_dead_root(
     ntt_queue_heap_t* self,
-    const ntt_queue_slab_t* slab)
+    const ntt_slab_t* slab)
 {
     while (self->size > 0 && !ntt_queue_heap_live(slab, &self->elems[0])) {
         ntt_queue_heap_pop_root(self);
@@ -134,7 +134,7 @@ static void ntt_queue_heap_drop_dead_root(
  */
 static void ntt_queue_heap_compact(
     ntt_queue_heap_t* self,
-    const ntt_queue_slab_t* slab)
+    const ntt_slab_t* slab)
 {
     if (self->tombstones * 2 <= self->size) {
         return;
@@ -170,7 +170,7 @@ void ntt_queue_heap_init(ntt_queue_heap_t* self)
 
 int ntt_queue_heap_has_live(
     const ntt_queue_heap_t* self,
-    const ntt_queue_slab_t* slab)
+    const ntt_slab_t* slab)
 {
     uint32_t pos = 0;
     for (; pos < self->size; ++pos) {
@@ -209,7 +209,7 @@ void ntt_queue_heap_push(
 
 int ntt_queue_heap_take_expired(
     ntt_queue_heap_t* self,
-    const ntt_queue_slab_t* slab,
+    const ntt_slab_t* slab,
     uint64_t now,
     ntt_queue_heap_elem_t* elem)
 {
@@ -228,7 +228,7 @@ int ntt_queue_heap_take_expired(
 
 void ntt_queue_heap_retire(
     ntt_queue_heap_t* self,
-    const ntt_queue_slab_t* slab,
+    const ntt_slab_t* slab,
     uint32_t cnt)
 {
     self->tombstones += cnt;

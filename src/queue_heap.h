@@ -6,7 +6,7 @@ EXTERN_START
 
 #include <stdint.h>
 
-typedef struct ntt_queue_slab ntt_queue_slab_t;
+typedef struct ntt_slab ntt_slab_t;
 
 /**
  * @brief Capacity the heap starts with.
@@ -68,7 +68,7 @@ void ntt_queue_heap_deinit(ntt_queue_heap_t* self);
  */
 int ntt_queue_heap_has_live(
     const ntt_queue_heap_t* self,
-    const ntt_queue_slab_t* slab);
+    const ntt_slab_t* slab);
 
 /**
  * @brief Read the earliest deadline in the heap, tombstones included.
@@ -111,7 +111,7 @@ void ntt_queue_heap_push(
  */
 int ntt_queue_heap_take_expired(
     ntt_queue_heap_t* self,
-    const ntt_queue_slab_t* slab,
+    const ntt_slab_t* slab,
     uint64_t now,
     ntt_queue_heap_elem_t* elem);
 
@@ -123,7 +123,7 @@ int ntt_queue_heap_take_expired(
  */
 void ntt_queue_heap_retire(
     ntt_queue_heap_t* self,
-    const ntt_queue_slab_t* slab,
+    const ntt_slab_t* slab,
     uint32_t cnt);
 
 EXTERN_STOP

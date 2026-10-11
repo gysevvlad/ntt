@@ -16,7 +16,7 @@ set(NTT_SOURCES
   src/timer_heap.c
   src/timer_service.c
   src/queue_heap.c
-  src/queue_slab.c
+  src/slab.c
   src/worker.c
   src/signal.c
   src/die.c
@@ -28,6 +28,7 @@ set(NTT_TEST_SOURCES
   src/list_test.cpp
   src/loop_test.cpp
   src/queue_test.cpp
+  src/slab_test.cpp
   src/task_list_test.cpp
   src/task_test.cpp
   src/timer_heap_test.cpp
@@ -36,6 +37,7 @@ set(NTT_TEST_SOURCES
 )
 
 set(NTT_BENCHMARK_SOURCES
+  src/slab_benchmark.cpp
   src/queue_benchmark.cpp
   src/timer_heap_benchmark.cpp
   src/timer_loop_benchmark.cpp
