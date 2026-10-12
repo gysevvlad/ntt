@@ -2,7 +2,7 @@
 
 #include "./queue_heap.h"
 #include "ntt/defs.h"
-#include "ntt/impl/epoll_event.h"
+#include "./event.h"
 #include "ntt/timer.h" // IWYU pragma: export
 
 EXTERN_START
@@ -16,12 +16,9 @@ typedef struct ntt_queue ntt_queue_t;
 /**
  * @brief Timer service: one timerfd and the set of queues armed on it.
  *
- * Internal for now. Creating one registers a timerfd in the epoll of the
- * loop, and there is no way yet to take a descriptor out of the epoll while
- * workers are running: that needs the barrier drain which
- * ntt_loop_del_epoll_event is still missing. So a service can only be
- * released together with the loop, which is not something to put in the
- * public API.
+ * Internal for now: a service is only released together with the loop, so
+ * there is nothing to hand out yet. Independent scheduling groups are what
+ * several services would be for.
  */
 typedef struct ntt_timer_service ntt_timer_service_t;
 
@@ -47,7 +44,7 @@ struct ntt_timer_service {
     int fd;
 
     ntt_loop_t* loop;
-    ntt_epoll_event_t event;
+    ntt_event_handle_t event;
 };
 
 /**

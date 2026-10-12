@@ -5,7 +5,7 @@
 #include "./worker.h"
 #include "combine.h"
 #include "malloc.h"
-#include "ntt/impl/epoll_event.h"
+#include "./event.h"
 #include "ntt/loop.h"
 #include "ntt/queue.h"
 #include "ntt/task.h"
@@ -84,7 +84,7 @@ static void ntt_loop_worker_svc(void* ctx, sigset_t* sigset)
             break;
         }
 
-        ntt_epoll_event_ready(&event);
+        ntt_event_dispatch(self, event.data.u64, event.events);
     }
 }
 
@@ -142,14 +142,16 @@ static void ntt_loop_combine_wakeup(ntt_loop_t* self, ntt_combine_t* combine)
  *  1. Check 1:1 notifications.
  *  2. Check how it would be work in multiple writes/reader in diffrenet modes.
  */
-void ntt_combine_eventfd_ready(ntt_epoll_event_t* event, ntt_loop_t* self, uint32_t events)
+static void ntt_combine_eventfd_ready(
+    ntt_event_handle_t event,
+    void* ctx,
+    int fd)
 {
-    (void)self;
     (void)event;
-    (void)events;
+    (void)ctx;
 
     eventfd_t value = 0;
-    if (eventfd_read(self->combine_eventfd, &value) != 0) {
+    if (eventfd_read(fd, &value) != 0) {
         if (errno != EAGAIN) {
             printf("read event fd fail %i\n", errno);
             abort();
@@ -158,21 +160,15 @@ void ntt_combine_eventfd_ready(ntt_epoll_event_t* event, ntt_loop_t* self, uint3
 }
 
 /**
- * @brief Dummy combine eventfd cancellation.
- */
-void ntt_combine_eventfd_cancelled(ntt_epoll_event_t* event, ntt_loop_t* self)
-{
-    (void)event;
-    (void)self;
-}
-
-/**
  * @brief Combine eventfd virtual table.
+ *
+ * The eventfd is released with the loop, so it is never cancelled.
  */
-const static ntt_epoll_event_vtbl_t ntt_g_combine_eventfd_cbs = {
+const static ntt_event_vtbl_t ntt_g_combine_eventfd_cbs = {
     .name      = "combine_eventfd",
-    .ready     = (void (*)(ntt_epoll_event_t*, void*, uint32_t))ntt_combine_eventfd_ready,
-    .cancelled = (void (*)(ntt_epoll_event_t*, void*))ntt_combine_eventfd_cancelled,
+    .readable  = ntt_combine_eventfd_ready,
+    .writable  = NULL,
+    .cancelled = NULL,
 };
 
 unsigned ntt_loop_clamp_width(unsigned width)
@@ -262,13 +258,19 @@ void ntt_loop_run(ntt_task_t* task, unsigned width)
     int combine_eventfd_flags = EFD_CLOEXEC | EFD_NONBLOCK | EFD_SEMAPHORE;
     self->combine_eventfd     = ntt_eventfd_or_die(0, combine_eventfd_flags);
 
-    ntt_epoll_event_init(&self->combine_event, &ntt_g_combine_eventfd_cbs, self, 0);
-    struct epoll_event event;
-    event.events   = EPOLLIN | EPOLLEXCLUSIVE;
-    event.data.ptr = &self->combine_event;
-    ntt_epoll_ctl_or_die(self->epoll_fd, EPOLL_CTL_ADD, self->combine_eventfd, &event);
-
     ntt_slab_init(&self->queue_slab, sizeof(ntt_queue_t));
+    ntt_slab_init(&self->event_slab, sizeof(ntt_event_t));
+
+    ntt_event_open(
+        self,
+        self->combine_eventfd,
+        EPOLLIN | EPOLLEXCLUSIVE,
+        NTT_INTEREST_READABLE,
+        &ntt_g_combine_eventfd_cbs,
+        self,
+        0,
+        &self->combine_event);
+
     ntt_timer_service_init(&self->timer_service, self);
 
     ntt_queue_t* queue = ntt_queue_create_in(self);
@@ -314,6 +316,7 @@ void ntt_loop_destroy(ntt_loop_t* self)
     // one can be inside a timerfd handler.
     ntt_timer_service_deinit(&self->timer_service);
     ntt_slab_deinit(&self->queue_slab);
+    ntt_slab_deinit(&self->event_slab);
 
     ntt_combine_deinit(&self->combine);
 
@@ -394,49 +397,19 @@ void ntt_loop_push_barrier(ntt_loop_t* self, ntt_task_t* task)
     }
 }
 
-void ntt_loop_add_internal_epoll_event(
-    ntt_loop_t* self,
-    int fd,
-    struct epoll_event* event)
+void ntt_loop_epoll_add(ntt_loop_t* self, int fd, struct epoll_event* event)
 {
     ntt_epoll_ctl_or_die(self->epoll_fd, EPOLL_CTL_ADD, fd, event);
+}
+
+void ntt_loop_epoll_del(ntt_loop_t* self, int fd)
+{
+    ntt_epoll_ctl_or_die(self->epoll_fd, EPOLL_CTL_DEL, fd, NULL);
 }
 
 ntt_combine_t* ntt_loop_combine(ntt_loop_t* self)
 {
     return &self->combine;
-}
-
-void ntt_loop_add_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event)
-{
-    struct epoll_event event;
-    event.data.ptr = epoll_event;
-    event.events   = epoll_event->events;
-
-    epoll_event->loop = self;
-    ntt_epoll_ctl_or_die(self->epoll_fd, EPOLL_CTL_ADD, epoll_event->fd, &event);
-    ntt_loop_work_enter(self);
-}
-
-static void ntt_loop_epoll_event_canceled(void* payload, ntt_task_action_t action)
-{
-    if (action != NTT_TASK_RUN) {
-        return;
-    }
-
-    ntt_epoll_event_t* self = *(ntt_epoll_event_t**)(payload);
-    ntt_loop_t* loop        = self->loop;
-    ntt_epoll_event_cancelled(self);
-    ntt_loop_work_leave(loop);
-}
-
-void ntt_loop_del_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event)
-{
-    ntt_epoll_ctl_or_die(self->epoll_fd, EPOLL_CTL_DEL, epoll_event->fd, NULL);
-    // ntt_task_t* task           = ntt_task_create(ntt_loop_epoll_event_canceled, NULL);
-    // *(ntt_epoll_event_t**)task = epoll_event;
-    // ntt_loop_post_barrier_task(self, task);
-    // return 0;
 }
 
 // static void ntt_loop_leader_enter(void* ctx, ntt_worker_t* worker)
@@ -746,23 +719,3 @@ void ntt_loop_del_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event)
 //     }
 // }
 
-// static void ntt_loop_epoll_event_canceled(void* payload)
-// {
-//     ntt_epoll_event_t* self = *(ntt_epoll_event_t**)(payload);
-//     ntt_loop_t* loop        = self->loop;
-//     ntt_epoll_event_cancelled(self);
-//     ntt_loop_work_leave(loop);
-// }
-
-// int ntt_loop_del_epoll_event(ntt_loop_t* self, ntt_epoll_event_t* epoll_event)
-// {
-//     abort();
-//     // int rc = epoll_ctl(self->epoll_fd, EPOLL_CTL_DEL, epoll_event->fd, NULL);
-//     // if (rc == -1) {
-//     //     return errno;
-//     // }
-//     // ntt_task_t* task           = ntt_task_create(ntt_loop_epoll_event_canceled, NULL);
-//     // *(ntt_epoll_event_t**)task = epoll_event;
-//     // ntt_loop_post_barrier_task(self, task);
-//     // return 0;
-// }

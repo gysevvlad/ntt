@@ -103,12 +103,12 @@ void ntt_timer_service_register(
  * leaves.
  */
 static void ntt_timer_service_ready(
-    ntt_epoll_event_t* event,
+    ntt_event_handle_t event,
     void* ctx,
-    uint32_t events)
+    int fd)
 {
     (void)event;
-    (void)events;
+    (void)fd;
 
     ntt_timer_service_t* self = ctx;
 
@@ -179,16 +179,16 @@ static void ntt_timer_service_ready(
     }
 }
 
-static void ntt_timer_service_cancelled(ntt_epoll_event_t* event, void* ctx)
-{
-    (void)event;
-    (void)ctx;
-}
-
-const static ntt_epoll_event_vtbl_t ntt_g_timer_service_vtbl = {
+/**
+ * @brief Timerfd virtual table.
+ *
+ * The timerfd is released with the loop, so it is never cancelled.
+ */
+const static ntt_event_vtbl_t ntt_g_timer_service_vtbl = {
     .name      = "timer_service",
-    .ready     = ntt_timer_service_ready,
-    .cancelled = ntt_timer_service_cancelled,
+    .readable  = ntt_timer_service_ready,
+    .writable  = NULL,
+    .cancelled = NULL,
 };
 
 void ntt_timer_service_init(ntt_timer_service_t* self, ntt_loop_t* loop)
@@ -203,17 +203,18 @@ void ntt_timer_service_init(ntt_timer_service_t* self, ntt_loop_t* loop)
         ntt_die();
     }
 
-    ntt_epoll_event_init(&self->event, &ntt_g_timer_service_vtbl, self, 0);
-    self->event.fd = self->fd;
-
     // Edge triggered, so one expiration gives one event, and exclusive, so
     // the kernel wakes one worker instead of all of them. The service is not
     // work of the loop: queues with armed timers keep the loop alive.
-    struct epoll_event event;
-    event.events   = EPOLLIN | EPOLLET | EPOLLEXCLUSIVE;
-    event.data.ptr = &self->event;
-
-    ntt_loop_add_internal_epoll_event(loop, self->fd, &event);
+    ntt_event_open(
+        loop,
+        self->fd,
+        EPOLLIN | EPOLLET | EPOLLEXCLUSIVE,
+        NTT_INTEREST_READABLE,
+        &ntt_g_timer_service_vtbl,
+        self,
+        0,
+        &self->event);
 }
 
 void ntt_timer_service_deinit(ntt_timer_service_t* self)

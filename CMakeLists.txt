@@ -11,6 +11,7 @@ set(NTT_SOURCES
   src/loop.c
   src/malloc.c
   src/queue.c
+  src/reader.c
   src/task.c
   src/timer.c
   src/timer_heap.c
@@ -25,6 +26,7 @@ set(NTT_SOURCES
 
 set(NTT_TEST_SOURCES
   src/combine_test.cpp
+  src/event_test.cpp
   src/list_test.cpp
   src/loop_test.cpp
   src/queue_test.cpp
@@ -126,6 +128,10 @@ target_link_libraries(ntt PRIVATE Threads::Threads)
 add_executable(ntt_example_00 example/example-00.c)
 
 target_link_libraries(ntt_example_00 PRIVATE ntt::ntt)
+
+add_executable(ntt_example_03 example/example-03.c)
+set_property(TARGET ntt_example_03 PROPERTY C_STANDARD 17)
+target_link_libraries(ntt_example_03 PRIVATE ntt::ntt)
 
 add_executable(ntt_example_06 example/example-06.c)
 

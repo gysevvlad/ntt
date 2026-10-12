@@ -1,48 +1,60 @@
 #include "./reader.h"
-#include "ntt/impl/malloc.h"
+#include "./malloc.h"
 
-#include <assert.h>
 #include <errno.h>
-#include <stdlib.h>
+#include <unistd.h>
 
-void ntt_reader_event_svc_cb(ntt_event_t* event, void* ctx, ntt_interest_t interest)
+static void ntt_reader_readable(ntt_event_handle_t event, void* ctx, int fd)
 {
-    ntt_reader_t* self = ntt_container_of(event, ntt_reader_t, event);
+    ntt_reader_t* self = ctx;
 
     for (;;) {
-        int rc = read(event->raw_event.fd, self->data, 1024);
-        if (rc == -1) {
-            if (errno == EWOULDBLOCK || errno == EAGAIN) {
-                break;
-            }
-            if (errno == EINTR) {
-                continue;
-            }
-            // TODO: something going wrong,
-            //       cancel event and provide cancel reason - ???
-            abort();
-            return;
+        ssize_t rc = read(fd, self->data, sizeof(self->data));
+
+        if (rc > 0) {
+            self->vtbl->on_data(self, self->ctx, self->data, (size_t)rc);
+            continue;
         }
+
         if (rc == 0) {
-            // TODO: provide cancel reason - EOF
-            ntt_event_cancel(event);
+            // Nothing more will ever arrive, so the reader is done.
+            ntt_event_cancel(self->loop, event);
             return;
         }
-        self->vtbl->on_data(self, ctx, self->data, rc);
+
+        if (errno == EINTR) {
+            continue;
+        }
+
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return;
+        }
+
+        self->ec = errno;
+        ntt_event_cancel(self->loop, event);
+        return;
     }
 }
 
-void ntt_reader_event_stopped_cb(ntt_event_t* event, void* ctx, ntt_ec_t ec)
+/**
+ * @brief The event is gone, so nothing of this reader is in flight.
+ *
+ * The descriptor belongs to whoever started the reader, so it is left open.
+ */
+static void ntt_reader_cancelled(void* ctx, int fd)
 {
-    ntt_reader_t* self = ntt_container_of(event, ntt_reader_t, event);
+    (void)fd;
 
-    self->vtbl->on_cancel(self, ctx, ec.ec);
+    ntt_reader_t* self = ctx;
+
+    self->vtbl->on_cancel(self, self->ctx, self->ec);
 }
 
 const static ntt_event_vtbl_t g_ntt_reader_vtbl = {
-    .name                 = "ntt_reader",
-    .ntt_event_svc_cb     = ntt_reader_event_svc_cb,
-    .ntt_event_stopped_cb = ntt_reader_event_stopped_cb,
+    .name      = "ntt_reader",
+    .readable  = ntt_reader_readable,
+    .writable  = NULL,
+    .cancelled = ntt_reader_cancelled,
 };
 
 void ntt_reader_init(
@@ -50,9 +62,11 @@ void ntt_reader_init(
     const ntt_reader_vtbl_t* vtbl,
     void* ctx)
 {
-    self->vtbl = vtbl;
-    self->ctx  = ctx;
-    ntt_event_init(&self->event, &g_ntt_reader_vtbl, self, NTT_INTEREST_READABLE);
+    self->vtbl  = vtbl;
+    self->ctx   = ctx;
+    self->loop  = NULL;
+    self->event = NTT_EVENT_HANDLE_NONE;
+    self->ec    = 0;
 }
 
 ntt_reader_t* ntt_reader_create(
@@ -75,13 +89,29 @@ void ntt_reader_start(
     int fd,
     ntt_loop_t* loop)
 {
-    ntt_event_start(&self->event, fd, loop);
+    self->loop = loop;
+
+    // Nothing of the reader may be touched after this: the handler can reach
+    // the end of the input and the cancellation can free the reader before it
+    // returns. The handle is written by the call itself, before that is
+    // possible.
+    ntt_event_start(
+        loop,
+        fd,
+        &g_ntt_reader_vtbl,
+        self,
+        NTT_INTEREST_READABLE,
+        &self->event);
 }
 
 void ntt_reader_cancel(
     ntt_reader_t* self)
 {
-    ntt_event_cancel(&self->event);
+    if (self->loop == NULL) {
+        return;
+    }
+
+    ntt_event_cancel(self->loop, self->event);
 }
 
 void ntt_reader_delete(

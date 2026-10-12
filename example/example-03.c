@@ -1,92 +1,81 @@
-#include "ntt/event.h"
-#include "ntt/signal_source.h"
-#include <asm-generic/errno-base.h>
-#include <asm-generic/errno.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <ntt/ntt.h>
+// Read standard input through the loop: the reader holds the loop running, and
+// the end of the input stops both.
 
-#include <assert.h>
-#include <signal.h>
+#include <ntt/loop.h>
+#include <ntt/queue.h>
+#include <ntt/reader.h>
+#include <ntt/task.h>
+
+#include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
-typedef struct app {
-    int stopped;
-    ntt_event_t* stdin_event;
-} app_t;
-
-void app_init(app_t* self)
+static void app_on_data(
+    ntt_reader_t* self,
+    void* ctx,
+    uint8_t* data,
+    size_t size)
 {
-    self->stopped     = 0;
-    self->stdin_event = NULL;
+    (void)self;
+    (void)ctx;
+
+    printf("read %zu bytes: ", size);
+    fwrite(data, 1, size, stdout);
+    fflush(stdout);
 }
 
-static void app_on_signal(ntt_loop_t* loop, void* ctx, int signal)
+static void app_on_cancel(ntt_reader_t* self, void* ctx, int ec)
 {
-    app_t* app = ctx;
-    ntt_event_cancel(app->stdin_event);
-}
+    (void)ctx;
 
-void ntt_stdin_reader_svc(ntt_event_t* self, void* ctx, ntt_interest_t interest)
-{
-    app_t* app = ctx;
-
-    char buffer[1024];
-    for (;;) {
-        printf("before\n");
-        int rc = read(STDIN_FILENO, buffer, 1024);
-        printf("after\n");
-        if (rc == -1) {
-            if (errno == EINTR) {
-                continue;
-            }
-            if (errno != EWOULDBLOCK || errno != EAGAIN) {
-                assert(0);
-            }
-            return;
-        }
-        if (rc == 0) {
-            ntt_event_cancel(app->stdin_event);
-        }
-        printf("get %i bytes\n", rc);
+    if (ec != 0) {
+        printf("stdin failed with %i\n", ec);
+    } else {
+        printf("stdin is at its end\n");
     }
+
+    ntt_reader_delete(self);
 }
 
-void ntt_stdin_reader_stopped(ntt_event_t* self, void* ctx, int ec)
-{
-    printf("reader stopped\n");
-}
-
-static const ntt_event_vtbl_t g_stdin_reader = {
-    .name                 = "stdin-reader",
-    .ntt_event_svc_cb     = ntt_stdin_reader_svc,
-    .ntt_event_stopped_cb = ntt_stdin_reader_stopped,
+static const ntt_reader_vtbl_t g_stdin_reader = {
+    .name      = "stdin-reader",
+    .on_data   = app_on_data,
+    .on_cancel = app_on_cancel,
 };
 
-void app_on_start(ntt_loop_t* loop, void* ctx)
+static void app_on_start(void* ctx, ntt_task_action_t action)
 {
-    app_t* app = ctx;
+    (void)ctx;
+
+    if (action != NTT_TASK_RUN) {
+        return;
+    }
 
     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-    if (fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK) == -1) {
-        perror("fcntl F_SETFL");
+
+    if (flags == -1 || fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK) == -1) {
+        perror("fcntl");
         abort();
     }
 
-    app->stdin_event = ntt_event_create(&g_stdin_reader, app, NTT_INTEREST_READABLE);
-    ntt_event_start(app->stdin_event, STDIN_FILENO, loop);
+    ntt_reader_t* reader = ntt_reader_create(&g_stdin_reader, NULL);
+
+    if (reader == NULL) {
+        abort();
+    }
+
+    ntt_reader_start(reader, STDIN_FILENO, ntt_queue_loop(ntt_queue_self()));
 }
 
 int main(int argc, char* argv[])
 {
-    app_t app;
-    app_init(&app);
-    ntt_loop_svc(
-        ntt_loop_cbs_make(
-            app_on_start,
-            app_on_signal),
-        &app, 4);
+    (void)argc;
+    (void)argv;
+
+    ntt_loop_run(ntt_task_create(app_on_start), 4);
+
     printf("app stopped\n");
+
     return 0;
 }
