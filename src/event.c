@@ -1,5 +1,6 @@
 #include "./event.h"
 #include "./loop.h"
+#include "./queue.h"
 #include "ntt/defs.h"
 #include "ntt/event.h"
 #include "ntt/impl/atomic.h"
@@ -81,7 +82,7 @@ static ntt_interest_t ntt_event_sides_of(uint32_t events, ntt_interest_t interes
 
 static int ntt_event_acquire_if_live(ntt_event_t* self)
 {
-    uint_fast32_t refs = atomic_load_explicit(&self->refs, memory_order_relaxed);
+    uint_least32_t refs = atomic_load_explicit(&self->refs, memory_order_relaxed);
 
     for (;;) {
         if (refs == 0) {
@@ -99,30 +100,23 @@ static int ntt_event_acquire_if_live(ntt_event_t* self)
     }
 }
 
-static void ntt_event_release(ntt_loop_t* loop, ntt_event_t* self)
+/**
+ * @brief The handle of an event, rebuilt from the slot it lives in.
+ *
+ * Sound while a reference is held: the generation only moves when the slot
+ * goes back to the slab.
+ */
+static ntt_event_handle_t ntt_event_handle_of(const ntt_event_t* self)
 {
-    // Acquire and release on the decrement itself, not a release plus a
-    // standalone acquire fence: the fence is correct by the memory model but
-    // opaque to the race detector, which then loses the edge between the last
-    // handler leaving and the teardown this very call sets off.
-    if (atomic_fetch_sub_explicit(&self->refs, 1, memory_order_acq_rel) != 1) {
-        return;
-    }
+    return (ntt_event_handle_t)ntt_slab_index(self)
+        | ((ntt_event_handle_t)ntt_slab_generation(self) << 32);
+}
 
-    uint32_t index = ntt_slab_index(self);
-    uint8_t flags  = self->flags;
+static ntt_event_t* ntt_event_of_task(void* payload)
+{
+    ntt_task_node_t* node = ntt_container_of(payload, ntt_task_node_t, payload);
 
-    if (self->vtbl->cancelled != NULL) {
-        self->vtbl->cancelled(self->ctx, self->fd);
-    }
-
-    // Bumps the generation, so every handle of this event becomes stale.
-    ntt_slab_give(ntt_loop_event_slab(loop), index);
-
-    // Last, since this is what lets the loop finish and take itself down.
-    if ((flags & NTT_EVENT_WORK) != 0) {
-        ntt_loop_work_leave(loop);
-    }
+    return ntt_container_of(node, ntt_event_t, task);
 }
 
 static void ntt_event_call(
@@ -138,15 +132,13 @@ static void ntt_event_call(
 }
 
 /**
- * @brief Run the handler of one side for as long as notifications keep coming.
+ * @brief Take a side for this caller.
  *
- * Returns right away when another worker holds the side: that worker sees the
- * readiness this one published and runs the handler again.
+ * @return 1 when the side is taken, 0 when another worker holds it, when there
+ *         is nothing to report, or when the event is cancelled. Whoever holds
+ *         the side sees the readiness published before this call and serves it.
  */
-static void ntt_event_run_side(
-    ntt_event_t* self,
-    ntt_event_handle_t handle,
-    ntt_interest_t side)
+static int ntt_event_claim_side(ntt_event_t* self, ntt_interest_t side)
 {
     unsigned shift = ntt_event_side_shift(side);
 
@@ -158,7 +150,7 @@ static void ntt_event_run_side(
     for (;;) {
         if ((state & ready) == 0
             || (state & (busy | NTT_EVENT_CLOSED)) != 0) {
-            return;
+            return 0;
         }
 
         if (atomic_compare_exchange_weak_explicit(
@@ -167,41 +159,191 @@ static void ntt_event_run_side(
                 (state & ~ready) | busy,
                 memory_order_acquire,
                 memory_order_relaxed)) {
-            break;
+            return 1;
         }
     }
+}
+
+/**
+ * @brief Give a taken side up, unless a notification arrived meanwhile.
+ *
+ * @return 1 when the side stays taken because there is more to serve, 0 when
+ *         it has been given up.
+ */
+static int ntt_event_leave_side(ntt_event_t* self, ntt_interest_t side)
+{
+    unsigned shift = ntt_event_side_shift(side);
+
+    uint32_t ready = (uint32_t)NTT_EVENT_SIDE_READY << shift;
+    uint32_t busy  = (uint32_t)NTT_EVENT_SIDE_BUSY << shift;
+
+    uint32_t state = atomic_load_explicit(&self->state, memory_order_relaxed);
 
     for (;;) {
-        ntt_event_call(self, handle, side);
+        int again = (state & ready) != 0 && (state & NTT_EVENT_CLOSED) == 0;
 
-        state = atomic_load_explicit(&self->state, memory_order_relaxed);
+        uint32_t next = again
+            ? (state & ~ready)
+            : (state & ~(ready | busy));
 
-        for (;;) {
-            // Takes the readiness that arrived while the handler was running,
-            // and keeps the side to run it once more.
-            if ((state & ready) != 0 && (state & NTT_EVENT_CLOSED) == 0) {
-                if (atomic_compare_exchange_weak_explicit(
-                        &self->state,
-                        &state,
-                        state & ~ready,
-                        memory_order_acquire,
-                        memory_order_relaxed)) {
-                    break;
-                }
-
-                continue;
-            }
-
-            if (atomic_compare_exchange_weak_explicit(
-                    &self->state,
-                    &state,
-                    state & ~(ready | busy),
-                    memory_order_release,
-                    memory_order_relaxed)) {
-                return;
-            }
+        if (atomic_compare_exchange_weak_explicit(
+                &self->state,
+                &state,
+                next,
+                again ? memory_order_acquire : memory_order_release,
+                memory_order_relaxed)) {
+            return again;
         }
     }
+}
+
+/**
+ * @brief Serve a taken side here and now, for as long as notifications come.
+ */
+static void ntt_event_serve_side(
+    ntt_event_t* self,
+    ntt_event_handle_t handle,
+    ntt_interest_t side)
+{
+    do {
+        ntt_event_call(self, handle, side);
+    } while (ntt_event_leave_side(self, side));
+}
+
+static void ntt_event_release(ntt_loop_t* loop, ntt_event_t* self);
+static void ntt_event_post_readable(ntt_event_t* self);
+
+/**
+ * @brief Body of the task that serves the readable side in the queue.
+ *
+ * NTT_TASK_DROP alone cannot happen: a queue is only destroyed once it is
+ * empty.
+ */
+static void ntt_event_readable_task_svc(void* payload, ntt_task_action_t action)
+{
+    if (action != NTT_TASK_RUN) {
+        return;
+    }
+
+    ntt_event_t* self = ntt_event_of_task(payload);
+
+    ntt_event_call(self, ntt_event_handle_of(self), NTT_INTEREST_READABLE);
+}
+
+/**
+ * @brief The queue is done with the node of the readable task.
+ *
+ * The side is held until here, and not until the end of the handler: the queue
+ * reads the node after the callback has returned, so this is the first moment
+ * the node may be handed over again. Owns the reference the dispatch gave.
+ */
+static void ntt_event_readable_task_free(void* ptr)
+{
+    ntt_event_t* self = ntt_container_of(
+        (ntt_task_node_t*)ptr,
+        ntt_event_t,
+        task);
+
+    if (ntt_event_leave_side(self, NTT_INTEREST_READABLE)) {
+        ntt_event_post_readable(self);
+        return;
+    }
+
+    ntt_event_release(ntt_queue_loop(self->queue), self);
+}
+
+static void ntt_event_post_readable(ntt_event_t* self)
+{
+    ntt_queue_push_task(
+        self->queue,
+        ntt_task_init(
+            &self->task,
+            ntt_event_readable_task_svc,
+            ntt_event_readable_task_free));
+}
+
+static void ntt_event_cancelled_task_svc(void* payload, ntt_task_action_t action)
+{
+    if (action != NTT_TASK_RUN) {
+        return;
+    }
+
+    ntt_event_t* self = ntt_event_of_task(payload);
+
+    if (self->vtbl->cancelled != NULL) {
+        self->vtbl->cancelled(self->ctx, self->fd);
+    }
+}
+
+/**
+ * @brief The queue is done with the node of the cancellation task.
+ *
+ * The slot goes back from here and not from the task body, because the queue
+ * reads the node, which lives in the slot, after the body has returned.
+ */
+static void ntt_event_cancelled_task_free(void* ptr)
+{
+    ntt_event_t* self = ntt_container_of(
+        (ntt_task_node_t*)ptr,
+        ntt_event_t,
+        task);
+
+    ntt_queue_t* queue = self->queue;
+    ntt_loop_t* loop   = ntt_queue_loop(queue);
+    uint8_t flags      = self->flags;
+
+    // Bumps the generation, so every handle of this event becomes stale.
+    ntt_slab_give(ntt_loop_event_slab(loop), ntt_slab_index(self));
+    ntt_queue_release(queue);
+
+    // Last, since this is what lets the loop finish and take itself down.
+    if ((flags & NTT_EVENT_WORK) != 0) {
+        ntt_loop_work_leave(loop);
+    }
+}
+
+/**
+ * @brief Report the cancellation of an event the loop owns itself.
+ */
+static void ntt_event_teardown(ntt_loop_t* loop, ntt_event_t* self)
+{
+    uint32_t index = ntt_slab_index(self);
+    uint8_t flags  = self->flags;
+
+    if (self->vtbl->cancelled != NULL) {
+        self->vtbl->cancelled(self->ctx, self->fd);
+    }
+
+    ntt_slab_give(ntt_loop_event_slab(loop), index);
+
+    if ((flags & NTT_EVENT_WORK) != 0) {
+        ntt_loop_work_leave(loop);
+    }
+}
+
+static void ntt_event_release(ntt_loop_t* loop, ntt_event_t* self)
+{
+    // Acquire and release on the decrement itself, not a release plus a
+    // standalone acquire fence: the fence is correct by the memory model but
+    // opaque to the race detector, which then loses the edge between the last
+    // handler leaving and the teardown this very call sets off.
+    if (atomic_fetch_sub_explicit(&self->refs, 1, memory_order_acq_rel) != 1) {
+        return;
+    }
+
+    if (self->queue == NULL) {
+        ntt_event_teardown(loop, self);
+        return;
+    }
+
+    // Nothing can reach the event any more, so no side holds the node: report
+    // the cancellation where the owner of the descriptor lives.
+    ntt_queue_push_task(
+        self->queue,
+        ntt_task_init(
+            &self->task,
+            ntt_event_cancelled_task_svc,
+            ntt_event_cancelled_task_free));
 }
 
 static ntt_event_t* ntt_event_live(
@@ -228,6 +370,7 @@ static ntt_event_t* ntt_event_live(
 
 void ntt_event_open(
     ntt_loop_t* loop,
+    ntt_queue_t* queue,
     int fd,
     uint32_t events,
     ntt_interest_t interest,
@@ -240,14 +383,17 @@ void ntt_event_open(
 
     self->vtbl     = vtbl;
     self->ctx      = ctx;
+    self->queue    = queue;
     self->fd       = fd;
-    self->events   = events;
-    self->interest = interest;
+    self->interest = (uint8_t)interest;
     self->flags    = flags;
     atomic_store_explicit(&self->state, 0, memory_order_relaxed);
 
-    ntt_event_handle_t id = (ntt_event_handle_t)ntt_slab_index(self)
-        | ((ntt_event_handle_t)ntt_slab_generation(self) << 32);
+    if (queue != NULL) {
+        ntt_queue_acquire(queue);
+    }
+
+    ntt_event_handle_t id = ntt_event_handle_of(self);
 
     // Before anything can run a handler: a handler may cancel the event, and
     // the cancellation may free the very object this is written into.
@@ -283,7 +429,8 @@ void ntt_event_dispatch(
         return;
     }
 
-    ntt_interest_t sides = ntt_event_sides_of(events, self->interest);
+    ntt_interest_t sides
+        = ntt_event_sides_of(events, (ntt_interest_t)self->interest);
 
     if ((self->flags & NTT_EVENT_SERIAL) == 0) {
         if ((sides & NTT_INTEREST_READABLE) != 0) {
@@ -298,38 +445,45 @@ void ntt_event_dispatch(
         return;
     }
 
-    if (sides != 0) {
-        // Published before any side is claimed, so that whoever ends up
-        // running a side sees this notification, even if it is not this
-        // worker.
-        atomic_fetch_or_explicit(
-            &self->state,
-            ntt_event_side_state(sides, NTT_EVENT_SIDE_READY),
-            memory_order_release);
+    if (sides == 0) {
+        ntt_event_release(loop, self);
+        return;
+    }
 
-        // Writable first: one notification can carry both sides, and this
-        // worker takes them one after the other. Draining what is queued for
-        // sending is the short side, so it does not wait behind a reader.
-        if ((sides & NTT_INTEREST_WRITABLE) != 0) {
-            ntt_event_run_side(self, handle, NTT_INTEREST_WRITABLE);
-        }
+    // Published before any side is claimed, so that whoever ends up serving a
+    // side sees this notification, even if it is not this worker.
+    atomic_fetch_or_explicit(
+        &self->state,
+        ntt_event_side_state(sides, NTT_EVENT_SIDE_READY),
+        memory_order_release);
 
-        if ((sides & NTT_INTEREST_READABLE) != 0) {
-            ntt_event_run_side(self, handle, NTT_INTEREST_READABLE);
-        }
+    // The writable side is served here: draining what is queued for sending is
+    // the short side, and it has no business waiting behind a reader.
+    if ((sides & NTT_INTEREST_WRITABLE) != 0
+        && ntt_event_claim_side(self, NTT_INTEREST_WRITABLE)) {
+        ntt_event_serve_side(self, handle, NTT_INTEREST_WRITABLE);
+    }
+
+    // The readable side goes to the queue of the event, which takes over this
+    // reference.
+    if ((sides & NTT_INTEREST_READABLE) != 0
+        && ntt_event_claim_side(self, NTT_INTEREST_READABLE)) {
+        ntt_event_post_readable(self);
+        return;
     }
 
     ntt_event_release(loop, self);
 }
 
 void ntt_event_start(
-    ntt_loop_t* loop,
+    ntt_queue_t* queue,
     int fd,
     const ntt_event_vtbl_t* vtbl,
     void* ctx,
     ntt_interest_t interest,
     ntt_event_handle_t* handle)
 {
+    assert(queue != NULL);
     assert(interest != 0);
     assert(vtbl->cancelled != NULL);
     assert((interest & NTT_INTEREST_READABLE) == 0 || vtbl->readable != NULL);
@@ -346,7 +500,8 @@ void ntt_event_start(
     }
 
     ntt_event_open(
-        loop,
+        ntt_queue_loop(queue),
+        queue,
         fd,
         events,
         interest,

@@ -1,8 +1,10 @@
 #pragma once
 
 #include "./slab.h"
+#include "./task.h"
 #include <ntt/event.h>
 #include <ntt/impl/atomic.h>
+#include <ntt/queue.h>
 
 #include <stdint.h>
 
@@ -23,15 +25,17 @@ enum ntt_event_flags {
  * epoll_event.data.u64 stays safe to resolve after the event has stopped: the
  * generation of the slot tells a stale notification from a live one.
  *
- * The two sides of the descriptor are served independently, so a slow reader
- * does not hold back a writer of the same event.
+ * The readable side runs in the queue of the event, so its handler shares a
+ * context with the timers and the tasks of that queue. The writable side is
+ * served on the worker that got the notification, so a slow reader does not
+ * hold back a writer of the same event.
  *
  * The reference count is one for the caller that started the event plus one
  * for every handler in flight. The last one to leave reports the cancellation
  * and gives the slot back.
  *
- * The order of the fields keeps the whole thing within one cache line, which
- * is the stride the slab would round up to anyway.
+ * The order of the fields keeps the whole thing within the two cache lines the
+ * slab would round up to anyway, the second of which is the task node.
  */
 typedef struct ntt_event {
     ntt_slab_head_t slab_head;
@@ -39,19 +43,33 @@ typedef struct ntt_event {
     const ntt_event_vtbl_t* vtbl;
     void* ctx;
 
-    atomic_uint_fast32_t refs;
+    /**
+     * @brief Queue the readable side and the cancellation are delivered in.
+     *
+     * NULL for the descriptors the loop owns itself, which are served on the
+     * worker that got the notification.
+     */
+    ntt_queue_t* queue;
+
+    atomic_uint_least32_t refs;
+
+    /** Readiness and ownership of both sides, plus cancellation. */
+    atomic_uint_least32_t state;
 
     int fd;
 
-    /** Mask the descriptor is registered with. */
-    uint32_t events;
-
-    ntt_interest_t interest;
-
-    /** Readiness, ownership and quiescence of both sides, plus cancellation. */
-    atomic_uint_least32_t state;
+    /** Sides subscribed to, as ntt_interest_t. */
+    uint8_t interest;
 
     uint8_t flags;
+
+    /**
+     * @brief Carries the readable side into the queue, then the cancellation.
+     *
+     * One node is enough for both: the cancellation is only reported once no
+     * handler is left, so the node is free by then.
+     */
+    ntt_task_node_t task;
 } ntt_event_t;
 
 static inline uint32_t ntt_event_handle_index(ntt_event_handle_t handle)
@@ -68,12 +86,14 @@ static inline uint32_t ntt_event_handle_generation(ntt_event_handle_t handle)
  * @brief Register a descriptor and take the first reference.
  *
  * Internal entry point behind ntt_event_start. The loop uses it directly for
- * the descriptors it owns itself, which pass no NTT_EVENT_WORK, since those
- * must not keep the loop running, and may leave the cancelled callback NULL,
- * since they are only released with the loop.
+ * the descriptors it owns itself: those pass no queue, since they are served
+ * on the worker, no NTT_EVENT_WORK, since they must not keep the loop running,
+ * and may leave the cancelled callback NULL, since they are only released with
+ * the loop.
  */
 void ntt_event_open(
     ntt_loop_t* loop,
+    ntt_queue_t* queue,
     int fd,
     uint32_t events,
     ntt_interest_t interest,

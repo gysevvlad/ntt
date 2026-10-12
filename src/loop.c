@@ -263,6 +263,7 @@ void ntt_loop_run(ntt_task_t* task, unsigned width)
 
     ntt_event_open(
         self,
+        NULL,
         self->combine_eventfd,
         EPOLLIN | EPOLLEXCLUSIVE,
         NTT_INTEREST_READABLE,

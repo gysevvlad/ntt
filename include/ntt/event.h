@@ -2,6 +2,7 @@
 
 #include "ntt/defs.h"
 #include "ntt/loop.h"
+#include "ntt/queue.h"
 
 #include <stdint.h>
 
@@ -25,11 +26,12 @@ typedef uint64_t ntt_event_handle_t;
 /**
  * @brief Callbacks of an event.
  *
- * The two sides of a descriptor are independent: a readable handler and a
- * writable handler of the same event may run at the same time on two workers,
- * so whatever they share needs guarding, while each side on its own never runs
- * twice at once. The callback of a side that was not subscribed to may be left
- * out.
+ * The readable handler runs in the queue the event was started on, so it is
+ * serialized with the timers and the tasks of that queue. The writable handler
+ * runs on the worker that got the notification and may therefore run at the
+ * same time as the readable one, so whatever they share needs guarding. Each
+ * side on its own never runs twice at once. The callback of a side that was
+ * not subscribed to may be left out.
  */
 typedef struct ntt_event_vtbl {
     const char* name;
@@ -54,16 +56,19 @@ typedef struct ntt_event_vtbl {
     /**
      * @brief The event is gone and nothing of it is in flight any more.
      *
-     * Runs once, after the last handler of either side has returned. This is
-     * where the owner closes the descriptor and releases its context.
+     * Runs once in the queue of the event, after the last handler of either
+     * side has returned. This is where the owner closes the descriptor and
+     * releases its context.
      */
     void (*cancelled)(void* ctx, int fd);
 } ntt_event_vtbl_t;
 
 /**
- * @brief Start watching the descriptor in the loop.
+ * @brief Start watching the descriptor in the loop of the queue.
  *
- * Holds the loop running until the event is cancelled.
+ * The queue is where the readable handler and the cancellation run, so it is
+ * the context the owner of the descriptor lives in. The event keeps a
+ * reference to it, and holds the loop running, until it is cancelled.
  *
  * The handle is not returned but stored, and stored before the descriptor is
  * registered, which is the only way an owner can keep it: once the event can
@@ -72,7 +77,7 @@ typedef struct ntt_event_vtbl {
  * since every handler is given it anyway.
  */
 NTT_EXPORT void ntt_event_start(
-    ntt_loop_t* loop,
+    ntt_queue_t* queue,
     int fd,
     const ntt_event_vtbl_t* vtbl,
     void* ctx,

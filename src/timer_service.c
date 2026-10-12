@@ -1,4 +1,5 @@
 #include "./timer_service.h"
+#include "./event.h"
 
 #include "./die.h"
 #include "./loop.h"
@@ -208,6 +209,7 @@ void ntt_timer_service_init(ntt_timer_service_t* self, ntt_loop_t* loop)
     // work of the loop: queues with armed timers keep the loop alive.
     ntt_event_open(
         loop,
+        NULL,
         self->fd,
         EPOLLIN | EPOLLET | EPOLLEXCLUSIVE,
         NTT_INTEREST_READABLE,

@@ -1,4 +1,5 @@
 #include "./reader.h"
+#include <ntt/queue.h>
 #include "./malloc.h"
 
 #include <errno.h>
@@ -18,7 +19,7 @@ static void ntt_reader_readable(ntt_event_handle_t event, void* ctx, int fd)
 
         if (rc == 0) {
             // Nothing more will ever arrive, so the reader is done.
-            ntt_event_cancel(self->loop, event);
+            ntt_event_cancel(ntt_queue_loop(self->queue), event);
             return;
         }
 
@@ -31,7 +32,7 @@ static void ntt_reader_readable(ntt_event_handle_t event, void* ctx, int fd)
         }
 
         self->ec = errno;
-        ntt_event_cancel(self->loop, event);
+        ntt_event_cancel(ntt_queue_loop(self->queue), event);
         return;
     }
 }
@@ -64,7 +65,7 @@ void ntt_reader_init(
 {
     self->vtbl  = vtbl;
     self->ctx   = ctx;
-    self->loop  = NULL;
+    self->queue = NULL;
     self->event = NTT_EVENT_HANDLE_NONE;
     self->ec    = 0;
 }
@@ -87,16 +88,16 @@ ntt_reader_t* ntt_reader_create(
 void ntt_reader_start(
     ntt_reader_t* self,
     int fd,
-    ntt_loop_t* loop)
+    ntt_queue_t* queue)
 {
-    self->loop = loop;
+    self->queue = queue;
 
     // Nothing of the reader may be touched after this: the handler can reach
     // the end of the input and the cancellation can free the reader before it
     // returns. The handle is written by the call itself, before that is
     // possible.
     ntt_event_start(
-        loop,
+        queue,
         fd,
         &g_ntt_reader_vtbl,
         self,
@@ -107,11 +108,11 @@ void ntt_reader_start(
 void ntt_reader_cancel(
     ntt_reader_t* self)
 {
-    if (self->loop == NULL) {
+    if (self->queue == NULL) {
         return;
     }
 
-    ntt_event_cancel(self->loop, self->event);
+    ntt_event_cancel(ntt_queue_loop(self->queue), self->event);
 }
 
 void ntt_reader_delete(

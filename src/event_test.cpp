@@ -2,6 +2,7 @@
 #include <ntt/loop.h>
 #include <ntt/queue.h>
 #include <ntt/task.hpp>
+#include <ntt/timer.h>
 
 #include "./loop.h"
 
@@ -42,6 +43,11 @@ struct Probe {
 
     int fd { -1 };
     ntt_event_handle_t handle { NTT_EVENT_HANDLE_NONE };
+
+    /** Queue the event was started on, and what the callbacks saw instead. */
+    ntt_queue_t* queue { nullptr };
+    std::atomic<ntt_queue_t*> readable_queue { nullptr };
+    std::atomic<ntt_queue_t*> cancelled_queue { nullptr };
 };
 
 std::uint64_t drain(int fd)
@@ -69,6 +75,7 @@ void probe_readable(ntt_event_handle_t self, void* ctx, int fd)
     auto* probe = static_cast<Probe*>(ctx);
 
     probe->readable.fetch_add(1);
+    probe->readable_queue.store(ntt_queue_self());
     probe_side(probe, NTT_INTEREST_READABLE);
 
     int inside = probe->inside.fetch_add(1) + 1;
@@ -106,6 +113,7 @@ void probe_cancelled(void* ctx, int fd)
     auto* probe = static_cast<Probe*>(ctx);
 
     probe->cancelled.fetch_add(1);
+    probe->cancelled_queue.store(ntt_queue_self());
     close(fd);
 }
 
@@ -161,7 +169,7 @@ TEST(EventTest, ReadableRunsAndSelfCancelStopsTheLoop)
         ntt::make_task([&] {
             probe.fd     = make_eventfd();
             ntt_event_start(
-                ntt_loop_self(),
+                ntt_queue_self(),
                 probe.fd,
                 &g_probe_vtbl,
                 &probe,
@@ -192,7 +200,7 @@ TEST(EventTest, StartedEventKeepsTheLoopRunning)
             ntt::make_task([&] {
                 probe.fd     = make_eventfd();
                 ntt_event_start(
-                    ntt_loop_self(),
+                    ntt_queue_self(),
                     probe.fd,
                     &g_probe_vtbl,
                     &probe,
@@ -231,7 +239,7 @@ TEST(EventTest, CancellingTwiceReportsOnce)
         ntt::make_task([&] {
             probe.fd     = make_eventfd();
             ntt_event_start(
-                ntt_loop_self(),
+                ntt_queue_self(),
                 probe.fd,
                 &g_probe_vtbl,
                 &probe,
@@ -254,37 +262,46 @@ TEST(EventTest, StaleHandleDoesNotTouchTheEventThatReusedTheSlot)
 
     ntt_loop_run(
         ntt::make_task([&] {
-            ntt_loop_t* loop = ntt_loop_self();
-
-            first.fd     = make_eventfd();
+            first.fd = make_eventfd();
             ntt_event_start(
-                loop,
+                ntt_queue_self(),
                 first.fd,
                 &g_probe_vtbl,
                 &first,
                 NTT_INTEREST_READABLE,
                 &first.handle);
-            ntt_event_cancel(loop, first.handle);
 
-            second.fd     = make_eventfd();
-            ntt_event_start(
-                loop,
-                second.fd,
-                &g_probe_vtbl,
-                &second,
-                NTT_INTEREST_READABLE,
-                &second.handle);
+            ntt_event_cancel(ntt_loop_self(), first.handle);
 
-            // The slot is the one the first event just gave back.
-            EXPECT_EQ(
-                static_cast<std::uint32_t>(first.handle),
-                static_cast<std::uint32_t>(second.handle));
-            EXPECT_NE(first.handle, second.handle);
+            // The cancellation is a task of this queue, so it runs before
+            // anything pushed from here, and only then is the slot free.
+            ntt_queue_push(
+                ntt_queue_self(),
+                ntt::make_task([&] {
+                    ntt_loop_t* loop = ntt_loop_self();
 
-            ntt_event_cancel(loop, first.handle);
-            EXPECT_EQ(second.cancelled.load(), 0);
+                    EXPECT_EQ(first.cancelled.load(), 1);
 
-            ntt_event_cancel(loop, second.handle);
+                    second.fd = make_eventfd();
+                    ntt_event_start(
+                        ntt_queue_self(),
+                        second.fd,
+                        &g_probe_vtbl,
+                        &second,
+                        NTT_INTEREST_READABLE,
+                        &second.handle);
+
+                    // The slot is the one the first event gave back.
+                    EXPECT_EQ(
+                        static_cast<std::uint32_t>(first.handle),
+                        static_cast<std::uint32_t>(second.handle));
+                    EXPECT_NE(first.handle, second.handle);
+
+                    ntt_event_cancel(loop, first.handle);
+                    EXPECT_EQ(second.cancelled.load(), 0);
+
+                    ntt_event_cancel(loop, second.handle);
+                }));
         }),
         4);
 
@@ -307,7 +324,7 @@ TEST(EventTest, HandlersOfOneSideNeverOverlap)
             ntt::make_task([&] {
                 probe.fd     = make_eventfd();
                 ntt_event_start(
-                    ntt_loop_self(),
+                    ntt_queue_self(),
                     probe.fd,
                     &g_probe_vtbl,
                     &probe,
@@ -344,7 +361,7 @@ TEST(EventTest, CancellingWhileAHandlerRunsWaitsForIt)
             ntt::make_task([&] {
                 probe.fd     = make_eventfd();
                 ntt_event_start(
-                    ntt_loop_self(),
+                    ntt_queue_self(),
                     probe.fd,
                     &g_probe_vtbl,
                     &probe,
@@ -396,7 +413,7 @@ TEST(EventTest, TheKernelDecidesWhichSideIsReported)
                 peer     = pair[1];
 
                 ntt_event_start(
-                    ntt_loop_self(),
+                    ntt_queue_self(),
                     probe.fd,
                     &g_probe_vtbl,
                     &probe,
@@ -522,7 +539,7 @@ TEST(EventTest, ReadAndWriteOfOneSocketRunAtTheSameTime)
                 peer = pair[1];
 
                 ntt_event_start(
-                    ntt_loop_self(),
+                    ntt_queue_self(),
                     pair[0],
                     &g_pipeline_vtbl,
                     &pipeline,
@@ -640,7 +657,7 @@ TEST(EventTest, OwnerMayBeFreedByItsOwnHandler)
             eventfd_write(fd, 1);
 
             ntt_event_start(
-                ntt_loop_self(),
+                ntt_queue_self(),
                 fd,
                 &g_owner_vtbl,
                 owner,
@@ -651,4 +668,90 @@ TEST(EventTest, OwnerMayBeFreedByItsOwnHandler)
 
     ASSERT_EQ(stored_before_firing.load(), 1);
     ASSERT_EQ(cancelled.load(), 1);
+}
+
+namespace {
+
+/** Arms a deadline of its own queue, which only a queue context may do. */
+void timed_readable(ntt_event_handle_t self, void* ctx, int fd)
+{
+    auto* probe = static_cast<Probe*>(ctx);
+
+    drain(fd);
+    probe->readable.fetch_add(1);
+    probe->readable_queue.store(ntt_queue_self());
+
+    ntt_self_wakeup_after(
+        1'000'000,
+        ntt::make_task([probe, self] {
+            probe->writable.fetch_add(1);
+            probe->cancelled_queue.store(ntt_queue_self());
+            ntt_event_cancel(ntt_loop_self(), self);
+        }));
+}
+
+const ntt_event_vtbl_t g_timed_vtbl = {
+    .name      = "timed",
+    .readable  = timed_readable,
+    .writable  = nullptr,
+    .cancelled = probe_cancelled,
+};
+
+} // namespace
+
+TEST(EventTest, HandlersRunInTheQueueOfTheEvent)
+{
+    Probe probe;
+    probe.cancel_at = 1;
+
+    ntt_loop_run(
+        ntt::make_task([&] {
+            probe.queue = ntt_queue_self();
+            probe.fd    = make_eventfd();
+
+            ntt_event_start(
+                ntt_queue_self(),
+                probe.fd,
+                &g_probe_vtbl,
+                &probe,
+                NTT_INTEREST_READABLE,
+                &probe.handle);
+
+            eventfd_write(probe.fd, 1);
+        }),
+        4);
+
+    ASSERT_EQ(probe.readable.load(), 1);
+    ASSERT_EQ(probe.cancelled.load(), 1);
+    ASSERT_EQ(probe.readable_queue.load(), probe.queue);
+    ASSERT_EQ(probe.cancelled_queue.load(), probe.queue);
+}
+
+TEST(EventTest, AReadableHandlerCanArmATimerOfItsQueue)
+{
+    Probe probe;
+
+    ntt_loop_run(
+        ntt::make_task([&] {
+            probe.queue = ntt_queue_self();
+            probe.fd    = make_eventfd();
+
+            ntt_event_start(
+                ntt_queue_self(),
+                probe.fd,
+                &g_timed_vtbl,
+                &probe,
+                NTT_INTEREST_READABLE,
+                &probe.handle);
+
+            eventfd_write(probe.fd, 1);
+        }),
+        4);
+
+    ASSERT_EQ(probe.readable.load(), 1);
+
+    // The deadline fired, in the same queue, and stopped the event.
+    ASSERT_EQ(probe.writable.load(), 1);
+    ASSERT_EQ(probe.cancelled_queue.load(), probe.queue);
+    ASSERT_EQ(probe.cancelled.load(), 1);
 }

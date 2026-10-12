@@ -11,7 +11,7 @@ struct ntt_reader {
     const ntt_reader_vtbl_t* vtbl;
     void* ctx;
 
-    ntt_loop_t* loop;
+    ntt_queue_t* queue;
     ntt_event_handle_t event;
 
     /** What ended the reader, reported by on_cancel. */

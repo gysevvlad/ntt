@@ -2,7 +2,7 @@
 
 #include "./queue_heap.h"
 #include "ntt/defs.h"
-#include "./event.h"
+#include <ntt/event.h>
 #include "ntt/timer.h" // IWYU pragma: export
 
 EXTERN_START

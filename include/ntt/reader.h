@@ -2,6 +2,7 @@
 
 #include <ntt/defs.h>
 #include <ntt/loop.h>
+#include <ntt/queue.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -39,12 +40,13 @@ NTT_EXPORT ntt_reader_t* ntt_reader_create(
 /**
  * @brief Start reading the descriptor, which has to be non blocking.
  *
- * Holds the loop running until the reader stops. Call once.
+ * The callbacks run in the queue, so the reader shares a context with its
+ * timers and tasks. Holds the loop running until the reader stops. Call once.
  */
 NTT_EXPORT void ntt_reader_start(
     ntt_reader_t* self,
     int fd,
-    ntt_loop_t* loop);
+    ntt_queue_t* queue);
 
 /**
  * @brief Stop reading.

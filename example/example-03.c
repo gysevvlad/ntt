@@ -65,7 +65,7 @@ static void app_on_start(void* ctx, ntt_task_action_t action)
         abort();
     }
 
-    ntt_reader_start(reader, STDIN_FILENO, ntt_queue_loop(ntt_queue_self()));
+    ntt_reader_start(reader, STDIN_FILENO, ntt_queue_self());
 }
 
 int main(int argc, char* argv[])
