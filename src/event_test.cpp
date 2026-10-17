@@ -50,6 +50,12 @@ struct Probe {
     std::atomic<ntt_queue_t*> readable_queue { nullptr };
     std::atomic<ntt_queue_t*> writable_queue { nullptr };
     std::atomic<ntt_queue_t*> cancelled_queue { nullptr };
+    std::atomic<ntt_queue_t*> write_cancelled_queue { nullptr };
+
+    /** Order the sides were reported cancelled in, starting at one. */
+    std::atomic<int> cancelled_sides { 0 };
+    std::atomic<int> read_cancelled_at { 0 };
+    std::atomic<int> write_cancelled_at { 0 };
 };
 
 std::uint64_t drain(int fd)
@@ -111,20 +117,37 @@ void probe_writable(ntt_event_handle_t, void* ctx, int)
     probe_side(probe, NTT_INTEREST_WRITABLE);
 }
 
-void probe_cancelled(void* ctx, int fd)
+void probe_writable_cancelled(void* ctx, int fd)
+{
+    (void)fd;
+
+    auto* probe = static_cast<Probe*>(ctx);
+
+    probe->write_cancelled_at.store(probe->cancelled_sides.fetch_add(1) + 1);
+    probe->write_cancelled_queue.store(ntt_queue_self());
+}
+
+/**
+ * @brief Every probe here subscribes to the readable side.
+ *
+ * So this is the last report of the event, and the descriptor goes with it.
+ */
+void probe_readable_cancelled(void* ctx, int fd)
 {
     auto* probe = static_cast<Probe*>(ctx);
 
-    probe->cancelled.fetch_add(1);
+    probe->read_cancelled_at.store(probe->cancelled_sides.fetch_add(1) + 1);
     probe->cancelled_queue.store(ntt_queue_self());
+    probe->cancelled.fetch_add(1);
     close(fd);
 }
 
 const ntt_event_vtbl_t g_probe_vtbl = {
-    .name      = "probe",
-    .readable  = probe_readable,
-    .writable  = probe_writable,
-    .cancelled = probe_cancelled,
+    .name               = "probe",
+    .readable           = probe_readable,
+    .writable           = probe_writable,
+    .writable_cancelled = probe_writable_cancelled,
+    .readable_cancelled = probe_readable_cancelled,
 };
 
 /** Start an event, with the parameters the tests vary spelled out. */
@@ -549,10 +572,11 @@ void pipeline_cancelled(void* ctx, int fd)
 }
 
 const ntt_event_vtbl_t g_pipeline_vtbl = {
-    .name      = "pipeline",
-    .readable  = pipeline_readable,
-    .writable  = pipeline_writable,
-    .cancelled = pipeline_cancelled,
+    .name               = "pipeline",
+    .readable           = pipeline_readable,
+    .writable           = pipeline_writable,
+    .writable_cancelled = nullptr,
+    .readable_cancelled = pipeline_cancelled,
 };
 
 } // namespace
@@ -674,10 +698,11 @@ void owner_cancelled(void* ctx, int fd)
 }
 
 const ntt_event_vtbl_t g_owner_vtbl = {
-    .name      = "owner",
-    .readable  = owner_readable,
-    .writable  = nullptr,
-    .cancelled = owner_cancelled,
+    .name               = "owner",
+    .readable           = owner_readable,
+    .writable           = nullptr,
+    .writable_cancelled = nullptr,
+    .readable_cancelled = owner_cancelled,
 };
 
 } // namespace
@@ -736,10 +761,11 @@ void timed_readable(ntt_event_handle_t self, void* ctx, int fd)
 }
 
 const ntt_event_vtbl_t g_timed_vtbl = {
-    .name      = "timed",
-    .readable  = timed_readable,
-    .writable  = nullptr,
-    .cancelled = probe_cancelled,
+    .name               = "timed",
+    .readable           = timed_readable,
+    .writable           = nullptr,
+    .writable_cancelled = nullptr,
+    .readable_cancelled = probe_readable_cancelled,
 };
 
 } // namespace
@@ -868,3 +894,58 @@ TEST(EventTest, EachSideRunsInItsOwnQueue)
     ASSERT_EQ(probe.cancelled.load(), 1);
 }
 
+TEST(EventTest, CancellationIsReportedToEachSideInItsQueue)
+{
+    Probe probe;
+    probe.drains = false;
+
+    int peer = -1;
+
+    std::promise<ntt_loop_t*> started;
+    auto loop_ready = started.get_future();
+
+    std::jthread thread { [&] {
+        ntt_loop_run(
+            ntt::make_task([&] {
+                int pair[2] = { -1, -1 };
+                EXPECT_TRUE(make_socketpair(pair));
+
+                probe.fd    = pair[0];
+                peer        = pair[1];
+                probe.queue = ntt_queue_self();
+
+                ntt_queue_t* writer = ntt_queue_create();
+                probe.write_queue.store(writer);
+
+                start_event(
+                    ntt_queue_self(),
+                    writer,
+                    probe.fd,
+                    &g_probe_vtbl,
+                    &probe,
+                    static_cast<ntt_interest_t>(
+                        NTT_INTEREST_READABLE | NTT_INTEREST_WRITABLE),
+                    &probe.handle);
+
+                ntt_queue_release(writer);
+
+                started.set_value(ntt_loop_self());
+            }),
+            4);
+    } };
+
+    ntt_loop_t* loop = loop_ready.get();
+
+    ntt_event_cancel(loop, probe.handle);
+    thread.join();
+    close(peer);
+
+    // Both sides heard about it, each in the queue it ran in.
+    ASSERT_EQ(probe.cancelled_sides.load(), 2);
+    ASSERT_EQ(probe.write_cancelled_queue.load(), probe.write_queue.load());
+    ASSERT_EQ(probe.cancelled_queue.load(), probe.queue);
+
+    // The writable side first, so the readable one is the owner's last word.
+    ASSERT_EQ(probe.write_cancelled_at.load(), 1);
+    ASSERT_EQ(probe.read_cancelled_at.load(), 2);
+}

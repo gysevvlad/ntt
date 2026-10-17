@@ -186,10 +186,11 @@ static void ntt_timer_service_ready(
  * The timerfd is released with the loop, so it is never cancelled.
  */
 const static ntt_event_vtbl_t ntt_g_timer_service_vtbl = {
-    .name      = "timer_service",
-    .readable  = ntt_timer_service_ready,
-    .writable  = NULL,
-    .cancelled = NULL,
+    .name               = "timer_service",
+    .readable           = ntt_timer_service_ready,
+    .writable           = NULL,
+    .writable_cancelled = NULL,
+    .readable_cancelled = NULL,
 };
 
 void ntt_timer_service_init(ntt_timer_service_t* self, ntt_loop_t* loop)

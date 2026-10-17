@@ -165,10 +165,11 @@ static void ntt_combine_eventfd_ready(
  * The eventfd is released with the loop, so it is never cancelled.
  */
 const static ntt_event_vtbl_t ntt_g_combine_eventfd_cbs = {
-    .name      = "combine_eventfd",
-    .readable  = ntt_combine_eventfd_ready,
-    .writable  = NULL,
-    .cancelled = NULL,
+    .name               = "combine_eventfd",
+    .readable           = ntt_combine_eventfd_ready,
+    .writable           = NULL,
+    .writable_cancelled = NULL,
+    .readable_cancelled = NULL,
 };
 
 unsigned ntt_loop_clamp_width(unsigned width)

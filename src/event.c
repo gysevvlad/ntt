@@ -264,33 +264,31 @@ static void ntt_event_post_side(ntt_event_t* self, ntt_interest_t side)
     ntt_queue_push_task(self->queues[index], ctx);
 }
 
-/**
- * @brief The side whose queue the cancellation is reported in.
- */
-static unsigned ntt_event_report_index(const ntt_event_t* self)
+static void ntt_event_post_cancelled(ntt_event_t* self, ntt_interest_t side);
+
+static void ntt_event_report_cancelled(ntt_event_t* self, ntt_interest_t side)
 {
-    return self->queues[0] != NULL ? 0u : 1u;
+    void (*cb)(void*, int) = side == NTT_INTEREST_READABLE
+        ? self->vtbl->readable_cancelled
+        : self->vtbl->writable_cancelled;
+
+    if (cb != NULL) {
+        cb(self->ctx, self->fd);
+    }
 }
 
 /**
- * @brief Body of the task that reports the cancellation in the queue.
+ * @brief Give the event up for good.
+ *
+ * Runs after the last side has been reported, so nothing reaches the event any
+ * more and the fields it reads are its own.
  */
-static void ntt_event_cancelled_task_svc(void* payload, ntt_task_action_t action)
+static void ntt_event_finish(ntt_event_t* self)
 {
-    if (action != NTT_TASK_RUN) {
-        return;
-    }
-
-    ntt_event_t* self = ntt_event_task_ctx(payload)->event;
-
     ntt_queue_t* read  = self->queues[0];
     ntt_queue_t* write = self->queues[1];
     ntt_loop_t* loop   = ntt_queue_loop(read != NULL ? read : write);
     uint8_t flags      = self->flags;
-
-    if (self->vtbl->cancelled != NULL) {
-        self->vtbl->cancelled(self->ctx, self->fd);
-    }
 
     // Bumps the generation, so every handle of this event becomes stale.
     ntt_slab_give(ntt_loop_event_slab(loop), ntt_slab_index(self));
@@ -310,6 +308,45 @@ static void ntt_event_cancelled_task_svc(void* payload, ntt_task_action_t action
 }
 
 /**
+ * @brief Body of the task that reports one side of the cancellation.
+ *
+ * The sides are reported one after the other, writable first, so that the
+ * owner always hears about the readable side last and has one defined place to
+ * release the descriptor and itself.
+ */
+static void ntt_event_cancelled_task_svc(void* payload, ntt_task_action_t action)
+{
+    if (action != NTT_TASK_RUN) {
+        return;
+    }
+
+    ntt_event_task_ctx_t* ctx = ntt_event_task_ctx(payload);
+
+    ntt_event_t* self   = ctx->event;
+    ntt_interest_t side = (ntt_interest_t)ctx->side;
+
+    ntt_event_report_cancelled(self, side);
+
+    if (side == NTT_INTEREST_WRITABLE && self->queues[0] != NULL) {
+        ntt_event_post_cancelled(self, NTT_INTEREST_READABLE);
+        return;
+    }
+
+    ntt_event_finish(self);
+}
+
+static void ntt_event_post_cancelled(ntt_event_t* self, ntt_interest_t side)
+{
+    ntt_event_task_ctx_t* ctx
+        = ntt_event_task_ctx(ntt_task_create(ntt_event_cancelled_task_svc));
+
+    ctx->event = self;
+    ctx->side  = side;
+
+    ntt_queue_push_task(self->queues[ntt_event_side_index(side)], ctx);
+}
+
+/**
  * @brief Report the cancellation of an event the loop owns itself.
  */
 static void ntt_event_teardown(ntt_loop_t* loop, ntt_event_t* self)
@@ -317,9 +354,7 @@ static void ntt_event_teardown(ntt_loop_t* loop, ntt_event_t* self)
     uint32_t index = ntt_slab_index(self);
     uint8_t flags  = self->flags;
 
-    if (self->vtbl->cancelled != NULL) {
-        self->vtbl->cancelled(self->ctx, self->fd);
-    }
+    ntt_event_report_cancelled(self, (ntt_interest_t)self->interest);
 
     ntt_slab_give(ntt_loop_event_slab(loop), index);
 
@@ -343,17 +378,11 @@ static void ntt_event_release(ntt_loop_t* loop, ntt_event_t* self)
         return;
     }
 
-    // Nothing can reach the event any more: report the cancellation where the
-    // owner of the descriptor lives.
-    unsigned index = ntt_event_report_index(self);
-
-    ntt_event_task_ctx_t* ctx
-        = ntt_event_task_ctx(ntt_task_create(ntt_event_cancelled_task_svc));
-
-    ctx->event = self;
-    ctx->side  = 0;
-
-    ntt_queue_push_task(self->queues[index], ctx);
+    // Nothing can reach the event any more: report every side it has, each
+    // where that side ran.
+    ntt_event_post_cancelled(
+        self,
+        self->queues[1] != NULL ? NTT_INTEREST_WRITABLE : NTT_INTEREST_READABLE);
 }
 
 static ntt_event_t* ntt_event_live(
@@ -502,13 +531,19 @@ void ntt_event_dispatch(
 void ntt_event_start(const ntt_event_params_t* params)
 {
     assert(params->interest != 0);
-    assert(params->vtbl->cancelled != NULL);
     assert(
         (params->interest & NTT_INTEREST_READABLE) == 0
         || (params->vtbl->readable != NULL && params->read_queue != NULL));
     assert(
         (params->interest & NTT_INTEREST_WRITABLE) == 0
         || (params->vtbl->writable != NULL && params->write_queue != NULL));
+
+    // The side reported last is where the owner hears that the event is over,
+    // so that one needs its callback.
+    assert(
+        (params->interest & NTT_INTEREST_READABLE) != 0
+            ? params->vtbl->readable_cancelled != NULL
+            : params->vtbl->writable_cancelled != NULL);
 
     ntt_queue_t* queue = params->read_queue != NULL
         ? params->read_queue

@@ -52,10 +52,11 @@ static void ntt_reader_cancelled(void* ctx, int fd)
 }
 
 const static ntt_event_vtbl_t g_ntt_reader_vtbl = {
-    .name      = "ntt_reader",
-    .readable  = ntt_reader_readable,
-    .writable  = NULL,
-    .cancelled = ntt_reader_cancelled,
+    .name               = "ntt_reader",
+    .readable           = ntt_reader_readable,
+    .writable           = NULL,
+    .writable_cancelled = NULL,
+    .readable_cancelled = ntt_reader_cancelled,
 };
 
 void ntt_reader_init(

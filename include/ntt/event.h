@@ -53,14 +53,23 @@ typedef struct ntt_event_vtbl {
     void (*writable)(ntt_event_handle_t self, void* ctx, int fd);
 
     /**
-     * @brief The event is gone and nothing of it is in flight any more.
+     * @brief The writable side is gone and nothing of it is in flight.
      *
-     * Runs once, after the last handler of either side has returned, in the
-     * queue of the readable side, or of the writable one when there is no
-     * readable side. This is where the owner closes the descriptor and
+     * Runs in the queue of that side, so this is where the owner releases what
+     * belongs to writing. Comes before the readable side is reported, and is
+     * the last word only when there is no readable side. Optional.
+     */
+    void (*writable_cancelled)(void* ctx, int fd);
+
+    /**
+     * @brief The readable side is gone and nothing of it is in flight.
+     *
+     * Runs in the queue of that side, and after the writable side has been
+     * reported, so for an event that reads this is the last word: nothing of
+     * it is left, and this is where the owner closes the descriptor and
      * releases its context.
      */
-    void (*cancelled)(void* ctx, int fd);
+    void (*readable_cancelled)(void* ctx, int fd);
 } ntt_event_vtbl_t;
 
 /**
