@@ -207,16 +207,15 @@ void ntt_timer_service_init(ntt_timer_service_t* self, ntt_loop_t* loop)
     // Edge triggered, so one expiration gives one event, and exclusive, so
     // the kernel wakes one worker instead of all of them. The service is not
     // work of the loop: queues with armed timers keep the loop alive.
-    ntt_event_open(
-        loop,
-        NULL,
-        self->fd,
-        EPOLLIN | EPOLLET | EPOLLEXCLUSIVE,
-        NTT_INTEREST_READABLE,
-        &ntt_g_timer_service_vtbl,
-        self,
-        0,
-        &self->event);
+    ntt_event_params_t params = {
+        .fd       = self->fd,
+        .vtbl     = &ntt_g_timer_service_vtbl,
+        .ctx      = self,
+        .interest = NTT_INTEREST_READABLE,
+        .handle   = &self->event,
+    };
+
+    ntt_event_open(loop, &params, EPOLLIN | EPOLLET | EPOLLEXCLUSIVE, 0);
 }
 
 void ntt_timer_service_deinit(ntt_timer_service_t* self)

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "./slab.h"
-#include "./task.h"
 #include <ntt/event.h>
 #include <ntt/impl/atomic.h>
 #include <ntt/queue.h>
@@ -9,6 +8,9 @@
 #include <stdint.h>
 
 typedef struct ntt_loop ntt_loop_t;
+
+/** Sides a descriptor has, which index the queues and the task nodes. */
+#define NTT_EVENT_SIDES 2
 
 enum ntt_event_flags {
     /** Keeps the loop running while the event is started. */
@@ -25,17 +27,16 @@ enum ntt_event_flags {
  * epoll_event.data.u64 stays safe to resolve after the event has stopped: the
  * generation of the slot tells a stale notification from a live one.
  *
- * The readable side runs in the queue of the event, so its handler shares a
- * context with the timers and the tasks of that queue. The writable side is
- * served on the worker that got the notification, so a slow reader does not
- * hold back a writer of the same event.
+ * Each side runs in its own queue, so its handler shares a context with the
+ * timers and the tasks of that queue. Sides given different queues are served
+ * at the same time, so a slow reader does not hold back a writer.
  *
  * The reference count is one for the caller that started the event plus one
  * for every handler in flight. The last one to leave reports the cancellation
  * and gives the slot back.
  *
- * The order of the fields keeps the whole thing within the two cache lines the
- * slab would round up to anyway, the second of which is the task node.
+ * The order of the fields keeps the whole thing within the one cache line the
+ * slab would round up to anyway.
  */
 typedef struct ntt_event {
     ntt_slab_head_t slab_head;
@@ -44,12 +45,12 @@ typedef struct ntt_event {
     void* ctx;
 
     /**
-     * @brief Queue the readable side and the cancellation are delivered in.
+     * @brief Queue each side is delivered in, by side index.
      *
      * NULL for the descriptors the loop owns itself, which are served on the
      * worker that got the notification.
      */
-    ntt_queue_t* queue;
+    ntt_queue_t* queues[NTT_EVENT_SIDES];
 
     atomic_uint_least32_t refs;
 
@@ -62,14 +63,6 @@ typedef struct ntt_event {
     uint8_t interest;
 
     uint8_t flags;
-
-    /**
-     * @brief Carries the readable side into the queue, then the cancellation.
-     *
-     * One node is enough for both: the cancellation is only reported once no
-     * handler is left, so the node is free by then.
-     */
-    ntt_task_node_t task;
 } ntt_event_t;
 
 static inline uint32_t ntt_event_handle_index(ntt_event_handle_t handle)
@@ -85,22 +78,18 @@ static inline uint32_t ntt_event_handle_generation(ntt_event_handle_t handle)
 /**
  * @brief Register a descriptor and take the first reference.
  *
- * Internal entry point behind ntt_event_start. The loop uses it directly for
- * the descriptors it owns itself: those pass no queue, since they are served
- * on the worker, no NTT_EVENT_WORK, since they must not keep the loop running,
- * and may leave the cancelled callback NULL, since they are only released with
- * the loop.
+ * Internal entry point behind ntt_event_start, which also takes the epoll mask
+ * as it is instead of deriving it from the interest. The loop uses it directly
+ * for the descriptors it owns itself: those pass no queues, since they are
+ * served on the worker, no NTT_EVENT_WORK, since they must not keep the loop
+ * running, and may leave the cancelled callback NULL, since they are only
+ * released with the loop.
  */
 void ntt_event_open(
     ntt_loop_t* loop,
-    ntt_queue_t* queue,
-    int fd,
+    const ntt_event_params_t* params,
     uint32_t events,
-    ntt_interest_t interest,
-    const ntt_event_vtbl_t* vtbl,
-    void* ctx,
-    uint8_t flags,
-    ntt_event_handle_t* handle);
+    uint8_t flags);
 
 /**
  * @brief Run the handler of the event the notification carries.

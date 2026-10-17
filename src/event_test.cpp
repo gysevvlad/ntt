@@ -44,9 +44,11 @@ struct Probe {
     int fd { -1 };
     ntt_event_handle_t handle { NTT_EVENT_HANDLE_NONE };
 
-    /** Queue the event was started on, and what the callbacks saw instead. */
+    /** Queues the event was started on, and what the callbacks saw instead. */
     ntt_queue_t* queue { nullptr };
+    std::atomic<ntt_queue_t*> write_queue { nullptr };
     std::atomic<ntt_queue_t*> readable_queue { nullptr };
+    std::atomic<ntt_queue_t*> writable_queue { nullptr };
     std::atomic<ntt_queue_t*> cancelled_queue { nullptr };
 };
 
@@ -105,6 +107,7 @@ void probe_writable(ntt_event_handle_t, void* ctx, int)
     auto* probe = static_cast<Probe*>(ctx);
 
     probe->writable.fetch_add(1);
+    probe->writable_queue.store(ntt_queue_self());
     probe_side(probe, NTT_INTEREST_WRITABLE);
 }
 
@@ -123,6 +126,29 @@ const ntt_event_vtbl_t g_probe_vtbl = {
     .writable  = probe_writable,
     .cancelled = probe_cancelled,
 };
+
+/** Start an event, with the parameters the tests vary spelled out. */
+void start_event(
+    ntt_queue_t* read_queue,
+    ntt_queue_t* write_queue,
+    int fd,
+    const ntt_event_vtbl_t* vtbl,
+    void* ctx,
+    ntt_interest_t interest,
+    ntt_event_handle_t* handle)
+{
+    ntt_event_params_t params = {
+        .fd          = fd,
+        .vtbl        = vtbl,
+        .ctx         = ctx,
+        .interest    = interest,
+        .read_queue  = read_queue,
+        .write_queue = write_queue,
+        .handle      = handle,
+    };
+
+    ntt_event_start(&params);
+}
 
 int make_eventfd()
 {
@@ -168,8 +194,9 @@ TEST(EventTest, ReadableRunsAndSelfCancelStopsTheLoop)
     ntt_loop_run(
         ntt::make_task([&] {
             probe.fd     = make_eventfd();
-            ntt_event_start(
+            start_event(
                 ntt_queue_self(),
+                nullptr,
                 probe.fd,
                 &g_probe_vtbl,
                 &probe,
@@ -199,8 +226,9 @@ TEST(EventTest, StartedEventKeepsTheLoopRunning)
         ntt_loop_run(
             ntt::make_task([&] {
                 probe.fd     = make_eventfd();
-                ntt_event_start(
+                start_event(
                     ntt_queue_self(),
+                    nullptr,
                     probe.fd,
                     &g_probe_vtbl,
                     &probe,
@@ -238,8 +266,9 @@ TEST(EventTest, CancellingTwiceReportsOnce)
     ntt_loop_run(
         ntt::make_task([&] {
             probe.fd     = make_eventfd();
-            ntt_event_start(
+            start_event(
                 ntt_queue_self(),
+                nullptr,
                 probe.fd,
                 &g_probe_vtbl,
                 &probe,
@@ -263,8 +292,9 @@ TEST(EventTest, StaleHandleDoesNotTouchTheEventThatReusedTheSlot)
     ntt_loop_run(
         ntt::make_task([&] {
             first.fd = make_eventfd();
-            ntt_event_start(
+            start_event(
                 ntt_queue_self(),
+                nullptr,
                 first.fd,
                 &g_probe_vtbl,
                 &first,
@@ -283,8 +313,9 @@ TEST(EventTest, StaleHandleDoesNotTouchTheEventThatReusedTheSlot)
                     EXPECT_EQ(first.cancelled.load(), 1);
 
                     second.fd = make_eventfd();
-                    ntt_event_start(
+                    start_event(
                         ntt_queue_self(),
+                        nullptr,
                         second.fd,
                         &g_probe_vtbl,
                         &second,
@@ -323,8 +354,9 @@ TEST(EventTest, HandlersOfOneSideNeverOverlap)
         ntt_loop_run(
             ntt::make_task([&] {
                 probe.fd     = make_eventfd();
-                ntt_event_start(
+                start_event(
                     ntt_queue_self(),
+                    nullptr,
                     probe.fd,
                     &g_probe_vtbl,
                     &probe,
@@ -360,8 +392,9 @@ TEST(EventTest, CancellingWhileAHandlerRunsWaitsForIt)
         ntt_loop_run(
             ntt::make_task([&] {
                 probe.fd     = make_eventfd();
-                ntt_event_start(
+                start_event(
                     ntt_queue_self(),
+                    nullptr,
                     probe.fd,
                     &g_probe_vtbl,
                     &probe,
@@ -412,14 +445,17 @@ TEST(EventTest, TheKernelDecidesWhichSideIsReported)
                 probe.fd = pair[0];
                 peer     = pair[1];
 
-                ntt_event_start(
+                // Both sides in one queue: only the reported side matters
+                // here, and one queue is the simpler thing to ask for.
+                start_event(
+                    ntt_queue_self(),
                     ntt_queue_self(),
                     probe.fd,
                     &g_probe_vtbl,
                     &probe,
                     static_cast<ntt_interest_t>(
                         NTT_INTEREST_READABLE | NTT_INTEREST_WRITABLE),
-                     &probe.handle);
+                    &probe.handle);
 
                 started.set_value(ntt_loop_self());
             }),
@@ -538,14 +574,22 @@ TEST(EventTest, ReadAndWriteOfOneSocketRunAtTheSameTime)
 
                 peer = pair[1];
 
-                ntt_event_start(
+                // A queue of its own for the writable side: that is what lets
+                // it run while the reader holds its own queue.
+                ntt_queue_t* writer = ntt_queue_create();
+
+                start_event(
                     ntt_queue_self(),
+                    writer,
                     pair[0],
                     &g_pipeline_vtbl,
                     &pipeline,
                     static_cast<ntt_interest_t>(
                         NTT_INTEREST_READABLE | NTT_INTEREST_WRITABLE),
-                     &pipeline.handle);
+                    &pipeline.handle);
+
+                // The event holds its own reference to it.
+                ntt_queue_release(writer);
 
                 started.set_value(ntt_loop_self());
             }),
@@ -656,8 +700,9 @@ TEST(EventTest, OwnerMayBeFreedByItsOwnHandler)
             // still returning.
             eventfd_write(fd, 1);
 
-            ntt_event_start(
+            start_event(
                 ntt_queue_self(),
+                nullptr,
                 fd,
                 &g_owner_vtbl,
                 owner,
@@ -709,8 +754,9 @@ TEST(EventTest, HandlersRunInTheQueueOfTheEvent)
             probe.queue = ntt_queue_self();
             probe.fd    = make_eventfd();
 
-            ntt_event_start(
+            start_event(
                 ntt_queue_self(),
+                nullptr,
                 probe.fd,
                 &g_probe_vtbl,
                 &probe,
@@ -736,8 +782,9 @@ TEST(EventTest, AReadableHandlerCanArmATimerOfItsQueue)
             probe.queue = ntt_queue_self();
             probe.fd    = make_eventfd();
 
-            ntt_event_start(
+            start_event(
                 ntt_queue_self(),
+                nullptr,
                 probe.fd,
                 &g_timed_vtbl,
                 &probe,
@@ -755,3 +802,69 @@ TEST(EventTest, AReadableHandlerCanArmATimerOfItsQueue)
     ASSERT_EQ(probe.cancelled_queue.load(), probe.queue);
     ASSERT_EQ(probe.cancelled.load(), 1);
 }
+
+TEST(EventTest, EachSideRunsInItsOwnQueue)
+{
+    Probe probe;
+    probe.drains = false;
+
+    int peer = -1;
+
+    std::promise<ntt_loop_t*> started;
+    auto loop_ready = started.get_future();
+
+    std::jthread thread { [&] {
+        ntt_loop_run(
+            ntt::make_task([&] {
+                int pair[2] = { -1, -1 };
+                EXPECT_TRUE(make_socketpair(pair));
+
+                probe.fd = pair[0];
+                peer     = pair[1];
+                probe.queue = ntt_queue_self();
+
+                ntt_queue_t* writer = ntt_queue_create();
+                probe.write_queue.store(writer);
+
+                start_event(
+                    ntt_queue_self(),
+                    writer,
+                    probe.fd,
+                    &g_probe_vtbl,
+                    &probe,
+                    static_cast<ntt_interest_t>(
+                        NTT_INTEREST_READABLE | NTT_INTEREST_WRITABLE),
+                    &probe.handle);
+
+                ntt_queue_release(writer);
+
+                started.set_value(ntt_loop_self());
+            }),
+            4);
+    } };
+
+    ntt_loop_t* loop = loop_ready.get();
+
+    // A fresh socket is writable, so the writable side runs by itself.
+    bool wrote = wait_for([&] { return probe.writable.load() >= 1; });
+
+    ssize_t written = write(peer, "x", 1);
+    bool read_too   = wait_for([&] { return probe.readable.load() >= 1; });
+
+    ntt_event_cancel(loop, probe.handle);
+    thread.join();
+    close(peer);
+
+    ASSERT_TRUE(wrote);
+    ASSERT_EQ(written, 1);
+    ASSERT_TRUE(read_too);
+
+    ASSERT_EQ(probe.writable_queue.load(), probe.write_queue.load());
+    ASSERT_EQ(probe.readable_queue.load(), probe.queue);
+    ASSERT_NE(probe.write_queue.load(), probe.queue);
+
+    // The cancellation is reported in the queue of the readable side.
+    ASSERT_EQ(probe.cancelled_queue.load(), probe.queue);
+    ASSERT_EQ(probe.cancelled.load(), 1);
+}
+

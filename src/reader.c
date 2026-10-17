@@ -92,17 +92,20 @@ void ntt_reader_start(
 {
     self->queue = queue;
 
+    ntt_event_params_t params = {
+        .fd         = fd,
+        .vtbl       = &g_ntt_reader_vtbl,
+        .ctx        = self,
+        .interest   = NTT_INTEREST_READABLE,
+        .read_queue = queue,
+        .handle     = &self->event,
+    };
+
     // Nothing of the reader may be touched after this: the handler can reach
     // the end of the input and the cancellation can free the reader before it
     // returns. The handle is written by the call itself, before that is
     // possible.
-    ntt_event_start(
-        queue,
-        fd,
-        &g_ntt_reader_vtbl,
-        self,
-        NTT_INTEREST_READABLE,
-        &self->event);
+    ntt_event_start(&params);
 }
 
 void ntt_reader_cancel(

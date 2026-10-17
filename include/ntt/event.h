@@ -26,12 +26,11 @@ typedef uint64_t ntt_event_handle_t;
 /**
  * @brief Callbacks of an event.
  *
- * The readable handler runs in the queue the event was started on, so it is
- * serialized with the timers and the tasks of that queue. The writable handler
- * runs on the worker that got the notification and may therefore run at the
- * same time as the readable one, so whatever they share needs guarding. Each
- * side on its own never runs twice at once. The callback of a side that was
- * not subscribed to may be left out.
+ * Each side runs in the queue it was given, so a handler is serialized with
+ * the timers and the tasks of that queue. Two sides given different queues may
+ * therefore run at the same time, and whatever they share needs guarding; two
+ * sides given the same queue never do. A side on its own never runs twice at
+ * once. The callback of a side that was not subscribed to may be left out.
  */
 typedef struct ntt_event_vtbl {
     const char* name;
@@ -56,33 +55,57 @@ typedef struct ntt_event_vtbl {
     /**
      * @brief The event is gone and nothing of it is in flight any more.
      *
-     * Runs once in the queue of the event, after the last handler of either
-     * side has returned. This is where the owner closes the descriptor and
+     * Runs once, after the last handler of either side has returned, in the
+     * queue of the readable side, or of the writable one when there is no
+     * readable side. This is where the owner closes the descriptor and
      * releases its context.
      */
     void (*cancelled)(void* ctx, int fd);
 } ntt_event_vtbl_t;
 
 /**
- * @brief Start watching the descriptor in the loop of the queue.
- *
- * The queue is where the readable handler and the cancellation run, so it is
- * the context the owner of the descriptor lives in. The event keeps a
- * reference to it, and holds the loop running, until it is cancelled.
- *
- * The handle is not returned but stored, and stored before the descriptor is
- * registered, which is the only way an owner can keep it: once the event can
- * fire, a handler may already have cancelled it and the cancellation may
- * already have freed the owner. May be NULL when nobody keeps the handle,
- * since every handler is given it anyway.
+ * @brief What an event is started with.
  */
-NTT_EXPORT void ntt_event_start(
-    ntt_queue_t* queue,
-    int fd,
-    const ntt_event_vtbl_t* vtbl,
-    void* ctx,
-    ntt_interest_t interest,
-    ntt_event_handle_t* handle);
+typedef struct ntt_event_params {
+    /** Descriptor to watch, which has to be non blocking. */
+    int fd;
+
+    const ntt_event_vtbl_t* vtbl;
+    void* ctx;
+
+    /** Sides to watch. */
+    ntt_interest_t interest;
+
+    /**
+     * @brief Queues the sides run in, one each, of the same loop.
+     *
+     * A side that is subscribed to needs one. Giving both sides the same queue
+     * serializes the whole descriptor, which is the simplest thing to reason
+     * about; giving them different ones lets reading and writing proceed at
+     * the same time, at the price of guarding whatever they share.
+     */
+    ntt_queue_t* read_queue;
+    ntt_queue_t* write_queue;
+
+    /**
+     * @brief Where to store the handle of the event.
+     *
+     * Stored before the descriptor is registered, which is the only way an
+     * owner can keep it: once the event can fire, a handler may already have
+     * cancelled it and the cancellation may already have freed the owner. May
+     * be NULL when nobody keeps the handle, since every handler is given it
+     * anyway.
+     */
+    ntt_event_handle_t* handle;
+} ntt_event_params_t;
+
+/**
+ * @brief Start watching the descriptor.
+ *
+ * The event keeps a reference to every queue it was given, and holds the loop
+ * running, until it is cancelled.
+ */
+NTT_EXPORT void ntt_event_start(const ntt_event_params_t* params);
 
 /**
  * @brief Stop watching the descriptor and release the event.

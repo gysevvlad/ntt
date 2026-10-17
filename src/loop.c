@@ -261,16 +261,15 @@ void ntt_loop_run(ntt_task_t* task, unsigned width)
     ntt_slab_init(&self->queue_slab, sizeof(ntt_queue_t));
     ntt_slab_init(&self->event_slab, sizeof(ntt_event_t));
 
-    ntt_event_open(
-        self,
-        NULL,
-        self->combine_eventfd,
-        EPOLLIN | EPOLLEXCLUSIVE,
-        NTT_INTEREST_READABLE,
-        &ntt_g_combine_eventfd_cbs,
-        self,
-        0,
-        &self->combine_event);
+    ntt_event_params_t combine_params = {
+        .fd       = self->combine_eventfd,
+        .vtbl     = &ntt_g_combine_eventfd_cbs,
+        .ctx      = self,
+        .interest = NTT_INTEREST_READABLE,
+        .handle   = &self->combine_event,
+    };
+
+    ntt_event_open(self, &combine_params, EPOLLIN | EPOLLEXCLUSIVE, 0);
 
     ntt_timer_service_init(&self->timer_service, self);
 
